@@ -106,6 +106,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
       RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-60}
+      TRUST_PROXY_HEADER: ${TRUST_PROXY_HEADER:-false}
     depends_on:
       neo4j:
         condition: service_healthy

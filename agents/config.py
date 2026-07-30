@@ -34,12 +34,50 @@ _last_hit = {}
 _net_lock = threading.Lock()
 
 
-def polite_get(url, timeout=25.0, **kw):
-    """One request per second per host, with an honest user agent."""
+def is_public_url(url):
+    """Reject anything that points back inside the network.
+
+    The crawler follows links that come from feeds and search results, which
+    are outside our control. Without this check a crafted link could make the
+    crawler read the database admin page, the model server, or a cloud
+    metadata address, and store the response.
+    """
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    try:
+        parts = urlparse(url)
+        if parts.scheme not in ("http", "https"):
+            return False
+        host = parts.hostname
+        if not host:
+            return False
+        if host.lower() in ("localhost", "metadata", "metadata.google.internal"):
+            return False
+        infos = socket.getaddrinfo(host, None)
+        for info in infos:
+            ip = ipaddress.ip_address(info[4][0])
+            if (ip.is_private or ip.is_loopback or ip.is_link_local
+                    or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+                return False
+        return True
+    except Exception:
+        return False
+
+
+def polite_get(url, timeout=25.0, check_public=False, **kw):
+    """One request per second per host, with an honest user agent.
+
+    Pass check_public=True for any address that came from outside.
+    """
     import time
     from urllib.parse import urlparse
 
     import httpx
+
+    if check_public and not is_public_url(url):
+        raise ValueError("address is not a public host")
 
     host = urlparse(url).netloc.lower()
     with _net_lock:
@@ -49,5 +87,24 @@ def polite_get(url, timeout=25.0, **kw):
         _last_hit[host] = time.time()
     headers = kw.pop("headers", {})
     headers.setdefault("User-Agent", USER_AGENT)
+
+    follow = kw.pop("follow_redirects", True)
+    if check_public and follow:
+        # Follow redirects by hand so each hop is checked too. A public URL
+        # can redirect to an internal one.
+        current = url
+        for _ in range(4):
+            resp = httpx.get(current, timeout=timeout, headers=headers,
+                             follow_redirects=False, **kw)
+            if resp.status_code not in (301, 302, 303, 307, 308):
+                return resp
+            target = resp.headers.get("location", "")
+            if not target:
+                return resp
+            current = str(httpx.URL(current).join(target))
+            if not is_public_url(current):
+                raise ValueError("redirect points at a private address")
+        return resp
+
     return httpx.get(url, timeout=timeout, headers=headers,
-                     follow_redirects=kw.pop("follow_redirects", True), **kw)
+                     follow_redirects=follow, **kw)

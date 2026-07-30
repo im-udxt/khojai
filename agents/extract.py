@@ -24,6 +24,41 @@ SYSTEM = (
     "You reply with JSON only."
 )
 
+RELATIONS = [
+    "WORKS_AT", "LEADS", "OWNS", "MEMBER_OF", "AWARDED_CONTRACT",
+    "RECEIVED_CONTRACT", "INVESTIGATED_BY", "CHARGED_BY", "ACCUSED_OF",
+    "FILED_CASE", "NAMED_IN", "RULED_ON", "APPROVED", "BLOCKED",
+    "MET_WITH", "DONATED_TO", "APPOINTED", "RESIGNED_FROM",
+]
+TYPES = ["Person", "Company", "Government", "Court", "Place"]
+
+# A schema, not a suggestion. Ollama constrains generation to this shape, so
+# the quote can never be left out and the relation can never be invented.
+# Without it a 3B model drops the quote field on most articles and the claim
+# is thrown away, which made the yield close to zero.
+SCHEMA = {
+    "type": "object",
+    "properties": {
+        "claims": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "quote": {"type": "string", "minLength": 25},
+                    "subject": {"type": "string", "minLength": 2},
+                    "subject_type": {"type": "string", "enum": TYPES},
+                    "relation": {"type": "string", "enum": RELATIONS},
+                    "object": {"type": "string", "minLength": 2},
+                    "object_type": {"type": "string", "enum": TYPES},
+                },
+                "required": ["quote", "subject", "subject_type", "relation",
+                             "object", "object_type"],
+            },
+        }
+    },
+    "required": ["claims"],
+}
+
 PROMPT = """Read the article and list relationships it directly states.
 
 Allowed relations: WORKS_AT, LEADS, OWNS, MEMBER_OF, AWARDED_CONTRACT,
@@ -53,7 +88,7 @@ def _normalise(text):
     return WS.sub(" ", (text or "")).strip().lower()
 
 
-def call_model(prompt, system=SYSTEM, json_mode=True, timeout=None):
+def call_model(prompt, system=SYSTEM, json_mode=True, timeout=None, schema=None):
     payload = {
         "model": config.LLM_MODEL,
         "prompt": prompt,
@@ -61,7 +96,9 @@ def call_model(prompt, system=SYSTEM, json_mode=True, timeout=None):
         "stream": False,
         "options": {"temperature": 0, "num_ctx": config.LLM_CONTEXT},
     }
-    if json_mode:
+    if schema:
+        payload["format"] = schema
+    elif json_mode:
         payload["format"] = "json"
     resp = httpx.post(f"{config.OLLAMA_URL}/api/generate", json=payload,
                       timeout=timeout or config.LLM_TIMEOUT)
@@ -111,7 +148,7 @@ def claims_from(doc):
     budget = max((config.LLM_CONTEXT - 900) * 3, 2000)
     prompt = PROMPT.format(title=doc.get("title", ""), body=body[:budget])
     try:
-        raw = call_model(prompt)
+        raw = call_model(prompt, schema=SCHEMA)
     except Exception as exc:
         log.warning("model call failed: %s", str(exc)[:120])
         raise
@@ -120,7 +157,9 @@ def claims_from(doc):
     if not isinstance(data, dict):
         return []
 
-    haystack = _normalise(doc.get("title", "") + " " + body)
+    # The quote must come from the body. Small models otherwise copy the
+    # headline for every claim, which proves nothing.
+    haystack = _normalise(body)
     out = []
     for item in (data.get("claims") or [])[:12]:
         if not isinstance(item, dict):
@@ -128,20 +167,40 @@ def claims_from(doc):
         quote = (item.get("quote") or "").strip()
         if len(quote) < 25:
             continue
-        # The quote has to be in the article. This is the whole trust model.
         if _normalise(quote) not in haystack:
             continue
+
         subject = entities.canonical(item.get("subject"), item.get("subject_type"))
         obj = entities.canonical(item.get("object"), item.get("object_type"))
         if not subject or not obj or subject["uid"] == obj["uid"]:
             continue
+
+        # The quote has to actually mention what it is being used to prove.
+        # This catches the common failure where a real sentence is attached to
+        # an unrelated claim.
+        quoted = _normalise(quote)
+        if not (_mentions(quoted, subject) or _mentions(quoted, obj)):
+            continue
+
+        relation = (item.get("relation") or "").upper()
+        if relation not in RELATIONS:
+            continue
+
         out.append({
             "subject": subject,
-            "relation": (item.get("relation") or "MENTIONED_WITH").upper(),
+            "relation": relation,
             "object": obj,
             "quote": quote,
         })
     return out
+
+
+def _mentions(quoted_text, entity):
+    """True when the quote contains the entity name or a distinctive part."""
+    parts = [p for p in entity["key"].split() if len(p) > 3]
+    if not parts:
+        return entity["key"] in quoted_text
+    return any(p in quoted_text for p in parts)
 
 
 def summarise(question, evidence_lines):

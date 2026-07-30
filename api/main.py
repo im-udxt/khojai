@@ -30,6 +30,10 @@ NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "")
 REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
 RATE_LIMIT = int(os.environ.get("RATE_LIMIT_PER_MIN", "60"))
 ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
+# Only believe the Cloudflare client header when we are actually behind the
+# tunnel. Otherwise anyone could send that header and get a fresh rate limit
+# bucket on every request.
+TRUST_PROXY = os.environ.get("TRUST_PROXY_HEADER", "false").lower() == "true"
 
 app = FastAPI(title="KhojAI", docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(
@@ -48,8 +52,9 @@ SAFE_TEXT = re.compile(r"^[\w\s.,'&()/-]{1,120}$", re.UNICODE)
 
 @app.middleware("http")
 async def hardening(request: Request, call_next):
-    client = request.headers.get("cf-connecting-ip") or (
-        request.client.host if request.client else "unknown")
+    client = request.client.host if request.client else "unknown"
+    if TRUST_PROXY:
+        client = request.headers.get("cf-connecting-ip") or client
     bucket = f"khoj:rl:{client}:{int(time.time() // 60)}"
     try:
         used = rds.incr(bucket)

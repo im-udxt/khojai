@@ -97,9 +97,13 @@ def read_feeds(feeds=None):
 
 
 def fetch_article(url):
-    """Get the readable body of an article. Returns empty string on failure."""
+    """Get the readable body of an article. Returns empty string on failure.
+
+    The address came from a feed or a search result, so it is checked against
+    private ranges before anything is requested.
+    """
     try:
-        resp = config.polite_get(url, timeout=20)
+        resp = config.polite_get(url, timeout=20, check_public=True)
         if resp.status_code != 200:
             return ""
         text = strip_html(resp.text)
