@@ -1,0 +1,39 @@
+# Secrets. Never commit these.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*_token
+*_secret
+
+# Runtime data (lives in Docker named volumes, never in the repo)
+external-data/
+data/
+*.db
+*.sqlite3
+*.session
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Node
+node_modules/
+.next/
+out/
+npm-debug.log*
+
+# Logs and scratch
+*.log
+tmp/
+scratch/
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

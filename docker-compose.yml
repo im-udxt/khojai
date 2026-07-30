@@ -1,0 +1,133 @@
+name: khojai
+
+# Data lives in Docker named volumes, not in the project folder.
+# This is deliberate: a bind mount into the repo directory can be lost when the
+# folder is moved, synced, or cleaned. Named volumes survive reboots and are
+# backed up with scripts/backup.sh.
+
+networks:
+  khoj:
+    driver: bridge
+
+volumes:
+  neo4j-data:
+  neo4j-logs:
+  redis-data:
+  archive-data:
+  model-cache:
+
+services:
+  neo4j:
+    image: neo4j:5.20-community
+    container_name: khoj-neo4j
+    restart: unless-stopped
+    networks: [khoj]
+    ports:
+      # Bound to loopback. The graph is never exposed to the network or tunnel.
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
+    environment:
+      NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:?set NEO4J_PASSWORD in .env}"
+      NEO4J_server_memory_heap_initial__size: "${NEO4J_HEAP:-1G}"
+      NEO4J_server_memory_heap_max__size: "${NEO4J_HEAP:-1G}"
+      NEO4J_server_memory_pagecache_size: "${NEO4J_PAGECACHE:-512M}"
+      NEO4J_db_logs_query_enabled: "OFF"
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+
+  redis:
+    image: redis:7-alpine
+    container_name: khoj-redis
+    restart: unless-stopped
+    networks: [khoj]
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: >
+      redis-server
+      --maxmemory ${REDIS_MAXMEMORY:-512mb}
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+      --save 300 10
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  agents:
+    build: ./agents
+    container_name: khoj-agents
+    restart: unless-stopped
+    networks: [khoj]
+    env_file: .env
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+      REDIS_URL: redis://redis:6379/0
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      HF_HOME: /models
+      ARCHIVE_DIR: /archive
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - archive-data:/archive
+      - model-cache:/models
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import redis,os,json,sys,time; r=redis.Redis.from_url(os.environ['REDIS_URL'],decode_responses=True); h=r.get('khoj:health'); sys.exit(0 if h and time.time()-json.loads(h)['epoch']<180 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 180s
+
+  api:
+    build: ./api
+    container_name: khoj-api
+    restart: unless-stopped
+    networks: [khoj]
+    ports:
+      - "${API_BIND:-127.0.0.1}:${API_PORT:-8080}:8080"
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      REDIS_URL: redis://redis:6379/0
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
+      RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-60}
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8080/api/health')\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  web:
+    build:
+      context: ./web
+      args:
+        NEXT_PUBLIC_SITE_NAME: ${SITE_NAME:-KhojAI}
+    container_name: khoj-web
+    restart: unless-stopped
+    networks: [khoj]
+    ports:
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-3000}:3000"
+    environment:
+      API_INTERNAL_URL: http://api:8080
+    depends_on:
+      - api
