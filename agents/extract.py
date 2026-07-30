@@ -24,11 +24,14 @@ SYSTEM = (
     "You reply with JSON only."
 )
 
+# MENTIONED_WITH is the honest fallback. Without it a small model forces a
+# specific relation it is not sure about, and WORKS_AT becomes a dumping
+# ground for anything it cannot classify.
 RELATIONS = [
     "WORKS_AT", "LEADS", "OWNS", "MEMBER_OF", "AWARDED_CONTRACT",
     "RECEIVED_CONTRACT", "INVESTIGATED_BY", "CHARGED_BY", "ACCUSED_OF",
     "FILED_CASE", "NAMED_IN", "RULED_ON", "APPROVED", "BLOCKED",
-    "MET_WITH", "DONATED_TO", "APPOINTED", "RESIGNED_FROM",
+    "MET_WITH", "DONATED_TO", "APPOINTED", "RESIGNED_FROM", "MENTIONED_WITH",
 ]
 TYPES = ["Person", "Company", "Government", "Court", "Place"]
 
@@ -71,11 +74,21 @@ Entity types: Person, Company, Government, Court, Place
 Reply with this JSON shape and nothing else:
 {{"claims":[{{"subject":"name","subject_type":"Person","relation":"WORKS_AT","object":"name","object_type":"Company","quote":"the sentence from the article that says this"}}]}}
 
+What the relations mean:
+WORKS_AT is employment only. A person held in a jail does not work at it.
+LEADS is heading an organisation. APPOINTED is naming someone to a post.
+AWARDED_CONTRACT is the buyer, RECEIVED_CONTRACT is the supplier.
+CHARGED_BY and INVESTIGATED_BY name the agency doing it.
+MENTIONED_WITH means the two are linked but the article does not say how.
+
 Rules:
 1. Copy the quote from the article exactly. Do not shorten or reword it.
-2. Use full names as the article writes them.
+2. Use full names as the article writes them. Never use a description such as
+   "six accused" or "the convict" as a name.
 3. Skip anything the article only hints at.
-4. If the article states no clear relationship, reply {{"claims":[]}}.
+4. Use MENTIONED_WITH when you are not certain which relation applies. Do not
+   guess a specific one.
+5. If the article states no clear relationship, reply {{"claims":[]}}.
 
 TITLE: {title}
 
