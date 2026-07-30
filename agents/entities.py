@@ -82,9 +82,21 @@ def is_junk(name):
         return True
     if not re.search(r"[A-Za-z]", text):
         return True
-    # A single lowercase word is almost always a common noun, not an entity.
-    if " " not in text and text.islower():
+    # Names are capitalised. A phrase with no capital letter at all is a
+    # description, not a name. This throws out things like "six accused",
+    # "quashed clean chit" and "government bus driver", which smaller models
+    # return as if they were entities.
+    if not any(w[:1].isupper() for w in text.split()):
         return True
+    # A phrase where lowercase words outnumber capitalised ones is a
+    # description, not a name: "Government bus driver", "accused Ramesh said".
+    # Small joining words are ignored so "Reserve Bank of India" survives.
+    joiners = {"of", "and", "the", "for", "in", "on", "at", "to", "de", "van"}
+    words = [w for w in text.split() if w.lower() not in joiners]
+    if len(words) >= 2:
+        upper = sum(1 for w in words if w[:1].isupper())
+        if upper < len(words) - upper:
+            return True
     words = [w for w in re.split(r"\W+", low) if w]
     if words and all(w in STOPWORDS for w in words):
         return True
