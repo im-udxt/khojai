@@ -56,7 +56,7 @@ Everything lives in `.env`. The values worth knowing:
 | Name | What it does |
 | --- | --- |
 | `NEO4J_PASSWORD` | Database password. Required. |
-| `LLM_MODEL` | Which Ollama model reads articles. Default `qwen2.5:3b-instruct`. |
+| `LLM_MODEL` | Which Ollama model reads articles. Default `qwen2.5:3b-instruct`. `qwen2.5:7b-instruct` picks relations more accurately and is worth using if the machine has about 6 GB free. |
 | `TELEGRAM_BOT_TOKEN` | From BotFather. Leave blank to run without Telegram. |
 | `TELEGRAM_ALLOWED_USER_ID` | The only user allowed to use the bot. |
 | `CRAWL_INTERVAL_SECONDS` | Gap between feed sweeps. Default 180. |
