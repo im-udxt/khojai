@@ -134,23 +134,30 @@ def search_news(query, limit=30):
 
 
 def market_quotes():
-    """Quotes from the public Yahoo Finance endpoint. No API key needed."""
-    symbols = ",".join(s for s, _, _ in MARKETS)
+    """Quotes from Yahoo's chart endpoint.
+
+    The older quote endpoint started requiring a session cookie and returns
+    401, so this uses the chart endpoint, which is still open.
+    """
+    from urllib.parse import quote
+
     out = []
-    try:
-        resp = config.polite_get(
-            "https://query1.finance.yahoo.com/v7/finance/quote?symbols=" + symbols,
-            timeout=15)
-        data = resp.json().get("quoteResponse", {}).get("result", [])
-        by_symbol = {q.get("symbol"): q for q in data}
-    except Exception as exc:
-        log.warning("market quotes failed: %s", str(exc)[:100])
-        by_symbol = {}
     for symbol, label, kind in MARKETS:
-        q = by_symbol.get(symbol, {})
-        out.append({
-            "symbol": symbol, "label": label, "kind": kind,
-            "price": q.get("regularMarketPrice"),
-            "change_pct": q.get("regularMarketChangePercent"),
-        })
+        price = change = None
+        try:
+            resp = config.polite_get(
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(symbol)}"
+                "?interval=1d&range=5d",
+                timeout=15,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; KhojAI/2.0)"})
+            if resp.status_code == 200:
+                meta = resp.json()["chart"]["result"][0]["meta"]
+                price = meta.get("regularMarketPrice")
+                prev = meta.get("chartPreviousClose") or meta.get("previousClose")
+                if price and prev:
+                    change = round((price - prev) / prev * 100, 2)
+        except Exception as exc:
+            log.debug("quote failed for %s: %s", symbol, str(exc)[:80])
+        out.append({"symbol": symbol, "label": label, "kind": kind,
+                    "price": price, "change_pct": change})
     return out

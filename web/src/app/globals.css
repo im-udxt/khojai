@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-bg text-ink antialiased;
+}
+
+.card {
+  @apply rounded-lg border border-edge bg-panel p-4;
+}
+
+.label {
+  @apply mb-3 text-xs font-semibold uppercase tracking-wide text-dim;
+}
+
+.tag {
+  @apply inline-block rounded border border-edge px-1.5 py-0.5 text-[11px] text-dim;
+}
+
+a {
+  @apply text-link;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  @apply rounded bg-edge;
+}

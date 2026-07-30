@@ -10,9 +10,22 @@ import config
 import db
 import health
 import pipeline
+import sources
 import telegram_bot
 
 log = logging.getLogger("khoj.main")
+
+
+def markets_loop(stop, interval=300):
+    """Refresh the small market strip shown on the site."""
+    import json
+    while not stop.is_set():
+        try:
+            db.rds().set("khoj:markets",
+                         json.dumps({"quotes": sources.market_quotes()}), ex=1800)
+        except Exception as exc:
+            log.warning("market refresh failed: %s", str(exc)[:100])
+        stop.wait(interval)
 
 
 def wait_for_graph(attempts=40):
@@ -40,6 +53,7 @@ def main():
         threading.Thread(target=health.loop, args=(stop,), name="health", daemon=True),
         threading.Thread(target=pipeline.crawl_loop, args=(stop,), name="crawler", daemon=True),
         threading.Thread(target=pipeline.worker_loop, args=(stop,), name="worker", daemon=True),
+        threading.Thread(target=markets_loop, args=(stop,), name="markets", daemon=True),
     ]
     for t in threads:
         t.start()
