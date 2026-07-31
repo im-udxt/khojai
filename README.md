@@ -82,11 +82,28 @@ Back them up with `./scripts/backup.sh`. Start over with `./scripts/reset-data.s
 
 ## Putting it on the internet
 
-The site is meant to sit behind a Cloudflare tunnel. The containers only listen
-on loopback, so nothing is exposed on your network. Before you make it public:
+The site sits behind a Cloudflare tunnel. The containers only listen on
+loopback, so nothing is exposed on your network and no ports are forwarded on
+the router.
 
-1. Set `ALLOWED_ORIGINS` in `.env` to your hostname.
-2. Read `SECURITY.md` and follow the checklist.
+```bash
+cloudflared tunnel login          # once, opens a browser
+./scripts/setup-tunnel.sh khojai.uditgarg.in
+```
+
+The script creates a tunnel for this project, points the hostname at it, and
+runs it as a login service. Other tunnels on the machine are left alone. Only
+the website is published; the API is reached through the site, so its port is
+never exposed.
+
+Then set these in `.env` and restart the api container:
+
+```
+ALLOWED_ORIGINS=https://khojai.uditgarg.in
+TRUST_PROXY_HEADER=true
+```
+
+Read `SECURITY.md` before going public.
 
 ## Layout
 
