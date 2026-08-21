@@ -19,7 +19,10 @@ needs. There is no reason to expose port 8080 separately.
 
 ## How the API is protected
 
-- It only reads. There is no endpoint that writes, updates or deletes.
+- It only reads. There is no endpoint that writes, updates or deletes. This is
+  checked when endpoints are added: the watchlist and the merge queue are both
+  managed from Telegram or the command line, never from the site, because a
+  public page that could add a watch would be a public page that can write.
 - Every query uses parameters. User input is never joined into a query string,
   so it cannot change what a query does.
 - Text input is checked against a strict pattern, ids must be hexadecimal, and
@@ -32,6 +35,32 @@ needs. There is no reason to expose port 8080 separately.
 - Responses carry `X-Content-Type-Options`, `X-Frame-Options`,
   `Referrer-Policy`, `Permissions-Policy` and a restrictive
   `Content-Security-Policy`.
+
+## What the crawler will and will not fetch
+
+The crawler follows links from feeds, search results and other people's pages,
+which are outside our control. Every outbound request goes through one function
+that refuses any address resolving to a private, loopback, link local, reserved
+or multicast range, **and checks again after every redirect hop**. Without that,
+a crafted link could make the crawler read the database admin page, the model
+server or a cloud metadata address and store the response.
+
+It also asks each host for its robots file before walking its pages and obeys a
+refusal, holds to one request per second per host, and sends a user agent that
+says what it is.
+
+Two government sites have broken certificates. Neither was worked around by
+turning verification off. They are listed as unreachable in `docs/SOURCES.md`
+and left that way.
+
+## Bulk jobs that delete
+
+`cleanup.py`, `retype.py` and the merge pass rewrite or remove records. They
+are not on a timer and none of them run automatically except the merge pass,
+which only folds names where the difference is an initial or a title.
+
+`cleanup.py` reports and changes nothing unless given `--apply`. Take a backup
+first. `scripts/backup.sh` runs nightly and keeps seven.
 
 ## Containers
 
@@ -54,7 +83,9 @@ bot refuses to start rather than run open to the world.
 2. Change `NEO4J_PASSWORD` from the development value.
 3. Rotate the Telegram bot token if it has ever been pasted into a chat, an
    issue or a commit. Tokens shared that way should be treated as public.
-   BotFather can revoke and reissue with `/revoke`.
+   BotFather can revoke and reissue with `/revoke`. Put the new one in place
+   with `./scripts/set-telegram-token.sh <token>`, which checks it with
+   Telegram before writing it.
 4. Turn on Cloudflare's bot protection and a rate limiting rule at the edge.
    The API limit is a backstop, not a substitute.
 5. Check that `docker compose ps` shows database ports bound to `127.0.0.1`
