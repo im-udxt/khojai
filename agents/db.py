@@ -145,6 +145,13 @@ def save_claim(subject, relation, obj, quote, source):
         a=subject["uid"], b=obj["uid"], rel=relation,
         quote=quote[:600], ts=now().isoformat(),
     )
+    count_outlet(source.get("outlet") or "unknown", "claims")
+    try:
+        import watch
+        watch.on_claim(subject, relation, obj, quote, source)
+    except Exception as exc:
+        # A watchlist problem must never stop a claim being written.
+        log.debug("watch notify skipped: %s", str(exc)[:80])
     return True
 
 
@@ -189,14 +196,61 @@ def search_entities(text, limit=15):
 
 
 def stat(name, amount=1):
+    """Count one thing, for today and for all time.
+
+    The daily counter expires after nine days so the charts stay small. The
+    running total never expires, because "how much has this read since it was
+    switched on" is a different question from "what did it do today", and the
+    first one had no answer before.
+    """
     try:
-        key = f"khoj:stat:{now():%Y%m%d}:{name}"
         pipe = rds().pipeline()
-        pipe.incrby(key, amount)
-        pipe.expire(key, 86400 * 9)
+        pipe.incrby(f"khoj:stat:{now():%Y%m%d}:{name}", amount)
+        pipe.expire(f"khoj:stat:{now():%Y%m%d}:{name}", 86400 * 9)
+        pipe.incrby(f"khoj:total:{name}", amount)
+        pipe.setnx("khoj:total:since", now().isoformat())
         pipe.execute()
     except Exception:
         pass
+
+
+def totals():
+    """Every running total, with the date counting started.
+
+    Counting started when this was added, not when the project did, so the
+    date is returned alongside the numbers rather than left to be assumed.
+    """
+    names = ["seen", "queued", "processed", "claims", "duplicate",
+             "fetched", "merged", "alerts"]
+    out = {}
+    try:
+        r = rds()
+        values = r.mget([f"khoj:total:{n}" for n in names])
+        out = {n: int(v or 0) for n, v in zip(names, values)}
+        out["since"] = r.get("khoj:total:since") or ""
+    except Exception:
+        out = {n: 0 for n in names}
+        out["since"] = ""
+    return out
+
+
+def count_outlet(outlet, field="seen", amount=1):
+    """Per outlet running totals, so a source that produces nothing is visible."""
+    if not outlet:
+        return
+    try:
+        rds().hincrby(f"khoj:outlet:{field}", outlet, amount)
+    except Exception:
+        pass
+
+
+def outlet_totals(field="seen"):
+    try:
+        raw = rds().hgetall(f"khoj:outlet:{field}") or {}
+        return sorted(({"outlet": k, "value": int(v)} for k, v in raw.items()),
+                      key=lambda r: -r["value"])
+    except Exception:
+        return []
 
 
 def activity(actor, message):
