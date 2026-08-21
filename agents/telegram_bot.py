@@ -8,7 +8,7 @@ import logging
 
 from telegram import BotCommand, LinkPreviewOptions, Update
 from telegram.constants import ChatAction, ParseMode
-from telegram.error import TelegramError
+from telegram.error import InvalidToken, TelegramError
 from telegram.ext import (Application, CommandHandler, ContextTypes,
                           MessageHandler, filters)
 
@@ -170,11 +170,41 @@ def build():
     return _app
 
 
+async def idle():
+    """Keep the process alive so the crawler and worker threads keep running."""
+    while True:
+        await asyncio.sleep(3600)
+
+
 async def run():
-    app = build()
+    """Start the bot. A bad token must never take the rest of the system down.
+
+    The crawler and the worker are threads inside this process, so an
+    exception here used to kill collection entirely. A revoked token now
+    disables Telegram and leaves everything else running.
+    """
+    try:
+        app = build()
+    except Exception as exc:
+        log.error("telegram could not start, continuing without it: %s", str(exc)[:160])
+        await idle()
+        return
     if app is None:
-        while True:
-            await asyncio.sleep(3600)
+        await idle()
+        return
+    try:
+        await _serve(app)
+    except InvalidToken:
+        log.error("the telegram token was rejected, continuing without telegram")
+        db.activity("telegram", "token rejected, telegram is off")
+        await idle()
+    except Exception as exc:
+        log.error("telegram stopped, continuing without it: %s", str(exc)[:160])
+        db.activity("telegram", "stopped, the rest of the system keeps running")
+        await idle()
+
+
+async def _serve(app):
     async with app:
         await app.start()
         try:

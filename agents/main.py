@@ -67,7 +67,14 @@ def main():
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
 
-    asyncio.run(telegram_bot.run())
+    # Collection must survive anything the bot does. If the loop ever exits,
+    # hold the process open so the crawler and worker threads keep going.
+    try:
+        asyncio.run(telegram_bot.run())
+    except Exception as exc:
+        log.error("telegram loop ended, collection continues: %s", str(exc)[:160])
+    while not stop.is_set():
+        time.sleep(60)
 
 
 if __name__ == "__main__":
