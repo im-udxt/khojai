@@ -161,6 +161,11 @@ def is_junk(name):
             "including", "others", "other", "persons", "along", "alias",
             "namely", "etc", "various", "several"}:
         return True
+    # A bare "s" left standing on its own is the remains of an apostrophe
+    # that punctuation stripping removed: "Tamil Nadu s for Housing" was
+    # "Tamil Nadu's". A real name never has a lone s in it.
+    if "s" in low.split():
+        return True
     return False
 
 
