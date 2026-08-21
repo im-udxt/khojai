@@ -74,11 +74,13 @@ fails += (0 if allowed_pub else 1) + (0 if not allowed_priv else 1)
 print()
 print(f"news feeds:     {len(sources.NEWS_FEEDS)}")
 print(f"topic searches: {len(sources.TOPICS)}")
+print(f"outlets via search: {len(sources.VIA_SEARCH)}")
 print(f"listing pages:  {len(sources.SITES)}")
 print(f"all feeds:      {len(sources.all_feeds())}")
 
 seen = set()
 for group, rows, width in (("feed", sources.NEWS_FEEDS, 4),
+                           ("search", sources.VIA_SEARCH, 4),
                            ("topic", sources.TOPICS, 4),
                            ("site", sources.SITES, 5)):
     for row in rows:

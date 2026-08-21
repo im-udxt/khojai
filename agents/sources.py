@@ -29,18 +29,14 @@ NEWS_FEEDS = [
     ("indianexpress", "Indian Express", "https://indianexpress.com/section/india/feed/", 1),
     ("ie_cities", "Indian Express Cities", "https://indianexpress.com/section/cities/feed/", 2),
     ("ie_business", "Indian Express Business", "https://indianexpress.com/section/business/feed/", 2),
-    ("thewire", "The Wire", "https://thewire.in/rss", 1),
-    ("scroll", "Scroll.in", "https://scroll.in/feed", 1),
     ("livemint", "LiveMint", "https://www.livemint.com/rss/news", 1),
     ("bstandard", "Business Standard", "https://www.business-standard.com/rss/latest.rss", 1),
     ("businessline", "BusinessLine", "https://www.thehindubusinessline.com/feeder/default.rss", 2),
     ("financialexpress", "Financial Express", "https://www.financialexpress.com/feed/", 2),
     ("ndtv", "NDTV", "https://feeds.feedburner.com/ndtvnews-top-stories", 2),
     ("hindustantimes", "Hindustan Times", "https://www.hindustantimes.com/feeds/rss/india-news/rssfeed.xml", 2),
-    ("theprint", "ThePrint", "https://theprint.in/feed/", 2),
     ("thequint", "The Quint", "https://www.thequint.com/stories.rss", 2),
     ("newslaundry", "Newslaundry", "https://www.newslaundry.com/feed", 2),
-    ("caravan", "The Caravan", "https://caravanmagazine.in/feed", 2),
     ("frontline", "Frontline", "https://frontline.thehindu.com/feeder/default.rss", 1),
     ("economictimes", "Economic Times", "https://economictimes.indiatimes.com/rssfeedsdefault.cms", 2),
     ("moneycontrol", "Moneycontrol", "https://www.moneycontrol.com/rss/latestnews.xml", 2),
@@ -48,20 +44,34 @@ NEWS_FEEDS = [
     ("newsminute", "The News Minute", "https://www.thenewsminute.com/feed", 2),
     ("deccanherald", "Deccan Herald", "https://www.deccanherald.com/rss/national.rss", 2),
     ("telegraph", "Telegraph India", "https://www.telegraphindia.com/feeds/rss.jsp?id=3", 2),
-    ("firstpost", "Firstpost", "https://www.firstpost.com/rss/india.xml", 2),
     ("toi", "Times of India", "https://timesofindia.indiatimes.com/rssfeedstopstories.cms", 2),
     ("tnie", "New Indian Express", "https://www.newindianexpress.com/Nation/rssfeed/?id=170&getXmlFeed=true", 2),
-    ("livelaw", "LiveLaw", "https://www.livelaw.in/rss/top-stories", 1),
     ("barandbench", "Bar and Bench", "https://www.barandbench.com/feed", 1),
     ("indiaspend", "IndiaSpend", "https://www.indiaspend.com/feed", 1),
-    ("article14", "Article 14", "https://article-14.com/rss.xml", 1),
     ("downtoearth", "Down To Earth", "https://www.downtoearth.org.in/rss/all", 2),
     ("mongabay", "Mongabay India", "https://india.mongabay.com/feed/", 2),
     ("pib", "Press Information Bureau", "https://pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=3", 1),
     ("rbi", "Reserve Bank of India", "https://rbi.org.in/pressreleases_rss.xml", 1),
     ("sebi", "SEBI", "https://www.sebi.gov.in/sebirss.xml", 1),
-    ("reuters_india", "Reuters India", "https://news.google.com/rss/search?q=when:1d+allinurl:reuters.com+india&hl=en-IN&gl=IN&ceid=IN:en", 1),
     ("bbc_india", "BBC India", "https://feeds.bbci.co.uk/news/world/asia/india/rss.xml", 1),
+]
+
+
+# These outlets stopped answering a plain feed request. Four return a bot
+# page with a 200, two redirect into something that is not XML, and two are
+# simply 404 now. Their reporting is still indexed, so they are read through
+# a search scoped to the outlet instead. It is a worse source than a feed,
+# because the body still has to be fetched from a site that may refuse, but
+# it is much better than losing the outlet.
+VIA_SEARCH = [
+    ("thewire", "The Wire", "site:thewire.in", 1),
+    ("scroll", "Scroll.in", "site:scroll.in", 1),
+    ("theprint", "ThePrint", "site:theprint.in", 2),
+    ("livelaw", "LiveLaw", "site:livelaw.in", 1),
+    ("caravan", "The Caravan", "site:caravanmagazine.in", 2),
+    ("article14", "Article 14", "site:article-14.com", 1),
+    ("firstpost", "Firstpost", "site:firstpost.com", 2),
+    ("reuters_india", "Reuters India", "reuters india", 1),
 ]
 
 
@@ -151,8 +161,14 @@ def topic_feeds():
             for tid, name, query, tier in TOPICS]
 
 
+def outlet_search_feeds():
+    """Outlets that have to be reached through a search rather than a feed."""
+    return [(oid, name, google_news(query), tier)
+            for oid, name, query, tier in VIA_SEARCH]
+
+
 def all_feeds():
-    return NEWS_FEEDS + topic_feeds()
+    return NEWS_FEEDS + outlet_search_feeds() + topic_feeds()
 
 
 # Market lines shown on the site. Kept short on purpose.
