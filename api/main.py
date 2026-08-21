@@ -117,11 +117,18 @@ async def status():
     services["api"] = {"state": "up", "note": "read only"}
     services["agents"] = {"state": "down" if (not snapshot or stale) else "up",
                           "note": "no recent heartbeat" if (not snapshot or stale) else "running"}
+    if stale and snapshot:
+        # The snapshot is old, so nothing inside it can be trusted as current.
+        for name, info in services.items():
+            if name not in ("api",):
+                info["state"] = "unknown"
+                info["note"] = "no recent report from the agents container"
     down = [k for k, v in services.items() if v.get("state") != "up"]
     return {
         "checked": datetime.now(timezone.utc).isoformat(),
         "services": services,
         "queue_depth": (snapshot or {}).get("queue_depth", 0),
+        "processed_today": (snapshot or {}).get("processed_today", 0),
         "healthy": not down,
         "down": down,
     }
@@ -251,6 +258,120 @@ async def graph(entity: str | None = None,
         nodes.setdefault(r["ou"], {"id": r["ou"], "label": r["on_"], "type": r["ot"]})
         edges.append({"source": r["su"], "target": r["ou"], "relation": r["rel"]})
     return {"nodes": list(nodes.values()), "edges": edges}
+
+
+@app.get("/api/cases")
+async def cases(limit: int = Query(12, ge=1, le=40)):
+    """Names that several outlets link to others, grouped as cases to read.
+
+    A case is not a verdict. It is a name that has drawn enough independent
+    coverage to be worth reading in one place.
+    """
+    rows = await cypher(
+        "MATCH (e:Entity)-[r:CLAIM]-(other:Entity) "
+        "WITH e, count(r) AS links, count(DISTINCT r.outlet) AS outlets, "
+        "     collect(DISTINCT other.name)[..6] AS others, "
+        "     max(r.created) AS latest "
+        "WHERE links >= 2 AND outlets >= 1 "
+        "RETURN e.uid AS uid, e.name AS name, e.type AS type, links, outlets, "
+        "       others, toString(latest) AS latest "
+        "ORDER BY outlets DESC, links DESC LIMIT $limit", limit=limit)
+    for row in rows:
+        strength = "several outlets" if row["outlets"] > 2 else (
+            "two outlets" if row["outlets"] == 2 else "one outlet")
+        row["headline"] = (
+            f"{row['name']} appears in {row['links']} recorded links across {strength}.")
+    return {"cases": rows}
+
+
+@app.get("/api/case/{uid}")
+async def case_detail(uid: str):
+    """One case: every recorded link about a name, with its sources."""
+    if not re.fullmatch(r"[a-f0-9]{6,32}", uid or ""):
+        raise HTTPException(400, "invalid id")
+    base = await cypher(
+        "MATCH (e:Entity {uid:$uid}) RETURN e.uid AS uid, e.name AS name, "
+        "e.type AS type, coalesce(e.mentions,0) AS mentions, "
+        "toString(e.first_seen) AS first_seen, toString(e.last_seen) AS last_seen",
+        uid=uid)
+    if not base:
+        raise HTTPException(404, "not found")
+    claims = await cypher(
+        "MATCH (a:Entity {uid:$uid})-[r:CLAIM]->(b:Entity) "
+        "RETURN a.name AS subject, r.relation AS relation, b.name AS object, "
+        "r.quote AS quote, r.source_url AS url, r.outlet AS outlet, "
+        "toString(r.created) AS created "
+        "UNION "
+        "MATCH (a:Entity)-[r:CLAIM]->(b:Entity {uid:$uid}) "
+        "RETURN a.name AS subject, r.relation AS relation, b.name AS object, "
+        "r.quote AS quote, r.source_url AS url, r.outlet AS outlet, "
+        "toString(r.created) AS created", uid=uid)
+    claims.sort(key=lambda c: c.get("created") or "", reverse=True)
+    outlets = sorted({c["outlet"] for c in claims if c.get("outlet")})
+    relations = sorted({c["relation"] for c in claims})
+    row = base[0]
+    read = (
+        f"{row['name']} shows up in {len(claims)} recorded links from "
+        f"{len(outlets)} outlet{'s' if len(outlets) != 1 else ''}. "
+        f"The links recorded are: {', '.join(r.lower().replace('_', ' ') for r in relations)}. "
+        "Each one below carries the sentence it came from and a link to the article. "
+        "Read the sources before drawing any conclusion."
+    ) if claims else "Nothing has been recorded about this name yet."
+    return {**row, "reading": read, "outlets": outlets,
+            "relations": relations, "claims": claims[:100]}
+
+
+@app.get("/api/insights")
+async def insights():
+    """Numbers behind the charts. Every figure comes from the graph."""
+    by_type = await cypher(
+        "MATCH (e:Entity) RETURN e.type AS name, count(*) AS value "
+        "ORDER BY value DESC")
+    by_relation = await cypher(
+        "MATCH ()-[r:CLAIM]->() RETURN r.relation AS name, count(*) AS value "
+        "ORDER BY value DESC LIMIT 12")
+    by_outlet = await cypher(
+        "MATCH ()-[r:CLAIM]->() WHERE r.outlet IS NOT NULL AND r.outlet <> '' "
+        "RETURN r.outlet AS name, count(*) AS value ORDER BY value DESC LIMIT 10")
+    busiest = await cypher(
+        "MATCH (e:Entity)-[r:CLAIM]-() WITH e, count(r) AS links "
+        "WHERE links > 1 RETURN e.uid AS uid, e.name AS name, e.type AS type, "
+        "links AS value ORDER BY value DESC LIMIT 12")
+
+    day = datetime.now(timezone.utc).strftime("%Y%m%d")
+    daily = []
+    for back in range(6, -1, -1):
+        stamp = datetime.fromtimestamp(
+            datetime.now(timezone.utc).timestamp() - back * 86400,
+            tz=timezone.utc).strftime("%Y%m%d")
+        try:
+            daily.append({
+                "day": f"{stamp[4:6]}/{stamp[6:8]}",
+                "processed": int(rds.get(f"khoj:stat:{stamp}:processed") or 0),
+                "claims": int(rds.get(f"khoj:stat:{stamp}:claims") or 0),
+            })
+        except Exception:
+            daily.append({"day": f"{stamp[4:6]}/{stamp[6:8]}", "processed": 0, "claims": 0})
+
+    total_claims = sum(r["value"] for r in by_relation) or 0
+    outlets = len(by_outlet)
+    top_rel = by_relation[0]["name"].lower().replace("_", " ") if by_relation else "none"
+    top_entity = busiest[0]["name"] if busiest else "none"
+    summary = (
+        f"The graph holds {sum(r['value'] for r in by_type)} names and "
+        f"{total_claims} links drawn from {outlets} outlets. "
+        f"The most common link is {top_rel}. "
+        f"{top_entity} appears in more links than any other name."
+    ) if total_claims else "Nothing has been stored yet, so there is nothing to chart."
+
+    return {
+        "summary": summary,
+        "by_type": by_type,
+        "by_relation": by_relation,
+        "by_outlet": by_outlet,
+        "busiest": busiest,
+        "daily": daily,
+    }
 
 
 @app.get("/api/claims")

@@ -6,6 +6,7 @@ type Status = {
   checked: string;
   services: Record<string, { state: string; note: string }>;
   queue_depth: number;
+  processed_today: number;
   healthy: boolean;
   down: string[];
 };
@@ -15,7 +16,8 @@ const NAMES: Record<string, string> = {
   graph: 'Database',
   queue: 'Job queue',
   crawler: 'News crawler',
-  agents: 'Background worker',
+  worker: 'Article reader',
+  agents: 'Background service',
   api: 'Website API',
 };
 
@@ -57,15 +59,17 @@ export default function StatusPage() {
             >
               <span
                 className={`inline-block h-2.5 w-2.5 rounded-full ${
-                  info.state === 'up' ? 'bg-good' : 'bg-bad'
+                  info.state === 'up' ? 'bg-good' : info.state === 'unknown' ? 'bg-warn' : 'bg-bad'
                 }`}
               />
               <span className="text-sm">{NAMES[key] || key}</span>
               <span className="text-xs text-dim">{info.note}</span>
               <span
-                className={`ml-auto text-xs ${info.state === 'up' ? 'text-good' : 'text-bad'}`}
+                className={`ml-auto text-xs ${
+                  info.state === 'up' ? 'text-good' : info.state === 'unknown' ? 'text-warn' : 'text-bad'
+                }`}
               >
-                {info.state === 'up' ? 'working' : 'down'}
+                {info.state === 'up' ? 'working' : info.state === 'unknown' ? 'unknown' : 'down'}
               </span>
             </div>
           ))}
@@ -75,8 +79,14 @@ export default function StatusPage() {
       <section className="card">
         <h2 className="label">Queue</h2>
         <p className="text-sm">
-          {data.queue_depth} article{data.queue_depth === 1 ? '' : 's'} waiting to be read.
+          {data.queue_depth} article{data.queue_depth === 1 ? '' : 's'} waiting to be read.{' '}
+          {data.processed_today} read today.
         </p>
+        {data.queue_depth > 500 && data.processed_today === 0 && (
+          <p className="mt-2 text-xs text-bad">
+            The queue is growing and nothing has been read today. The reader is not keeping up.
+          </p>
+        )}
       </section>
     </div>
   );

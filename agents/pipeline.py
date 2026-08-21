@@ -181,9 +181,12 @@ def sweep():
 
 
 def crawl_loop(stop):
+    import health
     while not stop.is_set():
         try:
+            health.beat(health.CRAWLER_BEAT, "sweeping")
             sweep()
+            health.beat(health.CRAWLER_BEAT, "waiting")
         except Exception as exc:
             log.exception("sweep failed: %s", exc)
         stop.wait(config.CRAWL_INTERVAL)
@@ -210,24 +213,37 @@ def process_one(doc):
 
 def worker_loop(stop):
     """Take documents off the queue one at a time."""
+    import health
     while not stop.is_set():
+        health.beat(health.WORKER_BEAT, "checking model")
         if not extract.model_ready():
             db.rds().set("khoj:model_down", "1", ex=120)
+            health.beat(health.WORKER_BEAT, "waiting for the model")
             stop.wait(30)
             continue
         db.rds().delete("khoj:model_down")
 
         raw = db.rds().rpop("khoj:queue:priority") or db.rds().rpop("khoj:queue")
         if not raw:
+            health.beat(health.WORKER_BEAT, "idle")
             stop.wait(5)
             continue
         try:
             doc = json.loads(raw)
         except json.JSONDecodeError:
             continue
+        health.beat(health.WORKER_BEAT, f"reading {doc.get('title','')[:50]}")
         try:
             process_one(doc)
+            db.rds().delete(health.WORKER_FAILS)
         except Exception as exc:
+            # Count consecutive failures so health can tell a model that
+            # answers but cannot produce anything from a healthy one.
+            try:
+                db.rds().incr(health.WORKER_FAILS)
+                db.rds().expire(health.WORKER_FAILS, 1800)
+            except Exception:
+                pass
             log.warning("processing failed, document returned to queue: %s",
                         str(exc)[:120])
             db.rds().rpush("khoj:queue", raw)

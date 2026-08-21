@@ -19,9 +19,12 @@ check each one yourself.
 ## Screens
 
 - Home: counts for the day, the newest links found, and a live activity list.
-- Map: a picture of names and the links between them, filterable by type.
-- Status: which services are up or down and how many articles are waiting.
-- Name pages: everything stored about one name, each with its source.
+- Cases: names that turned up in several recorded links, grouped for reading.
+- Map: a canvas drawing of names and the links between them, with filters.
+- Insights: charts of what is stored and a plain summary of what they show.
+- Status: which parts are working, judged on progress rather than on whether
+  a port answers.
+- Name and case pages: every link about one name, each with its source.
 
 ## Telegram
 
@@ -34,20 +37,38 @@ A private bot answers questions. Only the user id set in `.env` can use it.
 
 ## Requirements
 
-- Docker
+- Docker (Docker Desktop, or colima on macOS)
 - [Ollama](https://ollama.com) on the host machine, not in a container
-- About 6 GB of free disk
+- About 6 GB of free disk and 4 GB of free memory
+
+Runs on macOS, Linux and Windows. Nothing is sent anywhere: the model runs on
+your machine and the graph stays in local volumes.
 
 ## Setup
 
+One command on any system. It checks what is missing, generates a database
+password, pulls the model and starts everything.
+
+macOS and Linux:
+
 ```bash
-git clone git@github.com:im-udxt/khojai.git
+git clone https://github.com/im-udxt/khojai.git
 cd khojai
-cp .env.example .env      # fill in NEO4J_PASSWORD and the Telegram values
-./scripts/setup-mac.sh    # or: docker compose up -d --build
+./scripts/install.sh
+```
+
+Windows:
+
+```powershell
+git clone https://github.com/im-udxt/khojai.git
+cd khojai
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 ```
 
 Then open http://localhost:3000
+
+Telegram stays off until you put a bot token and your user id in `.env`.
+Everything else runs without it.
 
 ## Configuration
 
@@ -105,15 +126,45 @@ TRUST_PROXY_HEADER=true
 
 Read `SECURITY.md` before going public.
 
+## How a claim is checked
+
+1. The crawler reads feeds and throws out anything seen before, off topic, or
+   near identical to something already read.
+2. The article body is fetched and archived before anything is derived from it.
+3. The model is given the article and a schema it must fill. The schema forces
+   a quote for every claim, so it cannot skip that field.
+4. The quote must appear in the article body word for word, must not be the
+   headline, and must mention the subject or the object. Anything else is
+   dropped.
+5. Names are canonicalised, so one spelling per name, and phrases that are
+   descriptions rather than names are rejected.
+6. What survives is stored with the quote, the outlet and the link.
+
+This is why the counts on the site are lower than the number of articles read.
+Most articles state nothing that survives step four.
+
 ## Layout
 
 ```
-docker-compose.yml   the six services
+docker-compose.yml   the five services
 agents/              crawling, entity handling, model calls, Telegram
+  config.py          settings and the polite fetcher
+  entities.py        name canonicalisation and typing
+  extract.py         the schema the model must fill, and quote checking
+  pipeline.py        crawl, filter, dedup, queue, worker
+  health.py          heartbeats and health rules
+  research.py        questions and investigations
 api/                 read only API for the site
 web/                 the site
-scripts/             setup, backup, reset
+scripts/             install, tunnel, backup, reset
 ```
+
+## Health
+
+The status page reports on progress, not reachability. The crawler and the
+article reader each write a heartbeat. If the reader stops while the queue
+grows, the status page says so. An earlier version asked whether Ollama was
+listening and called that healthy while nothing was being read at all.
 
 ## Licence
 

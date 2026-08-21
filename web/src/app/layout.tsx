@@ -24,7 +24,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </Link>
             <nav className="flex gap-4 text-sm text-dim">
               <Link href="/">Home</Link>
+              <Link href="/cases">Cases</Link>
               <Link href="/graph">Map</Link>
+              <Link href="/insights">Insights</Link>
               <Link href="/status">Status</Link>
             </nav>
             <div className="ml-auto w-full max-w-xs">
