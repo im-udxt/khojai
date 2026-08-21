@@ -71,11 +71,24 @@ JUNK = [
     "Raja, a native of Tamil Nadu, and Arjun",
     "for Revenue",
     "Tamil Nadu s for Housing and Urban Development Department",
+    "Union Home Affairs Ministry, Union Ministry of Corporate Affairs",
+    "Limba alias Limba Rathod",
+    "resident of Electronics City",
+    "family of Are Kiran",
+    "Kartikey Kumar Sharma, Senior Superintendent of Police SSP , Patna",
 ]
+# Long names and names with a comma in them are still names. An earlier
+# version of the rules would have deleted every one of these.
 KEEP = [
     "Reserve Bank of India", "K.C. Venugopal", "Adani Ports",
     "Supreme Court of India", "Bharatiya Janata Party", "Narendra Modi",
     "Enforcement Directorate", "Ministry of Home Affairs",
+    "Meta Platforms, Inc", "Indian Institute of Management, Indore",
+    "Sebi Research Analysts Regulations, 2014",
+    "Public Examinations Amendment Bill, 2026",
+    "Mahatma Gandhi National Rural Employment Guarantee Act MGNREGA",
+    "Agricultural and Processed Food Products Export Development Authority",
+    "Ministry of Road Transport and Highways MoRTH",
 ]
 
 print()

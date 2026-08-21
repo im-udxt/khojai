@@ -139,9 +139,19 @@ def is_junk(name):
     # as a node, which then pulled two unrelated people together when
     # duplicate names were folded.
     parts = text.split()
-    if "," in text:
+    # A comma inside a name is normal: "Meta Platforms, Inc" and "Indian
+    # Institute of Management, Indore" are names. A comma followed by a whole
+    # phrase is not: that is a list or a clause the model failed to split.
+    if text.count(",") > 1:
         return True
-    if len(parts) > 6:
+    if "," in text:
+        tail = text.split(",", 1)[1].strip()
+        if len(tail.split()) > 3:
+            return True
+    # Real institution names run long. "Agricultural and Processed Food
+    # Products Export Development Authority" is nine words and is a name, so
+    # this only catches what is plainly a sentence.
+    if len(parts) > 10:
         return True
     if parts and parts[0][:1].islower():
         # "for Roads and Buildings", "ten persons including". A name does not
