@@ -21,6 +21,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from neo4j import GraphDatabase
 
+import connections
+
 logging.basicConfig(level="INFO", format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("khoj.api")
 
@@ -258,6 +260,74 @@ async def graph(entity: str | None = None,
         nodes.setdefault(r["ou"], {"id": r["ou"], "label": r["on_"], "type": r["ot"]})
         edges.append({"source": r["su"], "target": r["ou"], "relation": r["rel"]})
     return {"nodes": list(nodes.values()), "edges": edges}
+
+
+SIMPLE_PATHS = """
+MATCH path = (a:Entity)-[rels:CLAIM*2..3]-(b:Entity)
+WHERE a.uid < b.uid
+  AND ALL(r IN rels WHERE r.relation <> 'MENTIONED_WITH')
+RETURN [n IN nodes(path) | n.name] AS names,
+       [n IN nodes(path) | n.uid] AS uids,
+       [r IN rels | r.relation] AS relations,
+       [r IN rels | r.quote] AS quotes,
+       [r IN rels | r.source_url] AS urls,
+       [r IN rels | r.outlet] AS outlets
+LIMIT $limit
+"""
+
+ENTITY_PATHS = """
+MATCH path = (a:Entity {uid:$uid})-[rels:CLAIM*1..3]-(b:Entity)
+WHERE ALL(r IN rels WHERE r.relation <> 'MENTIONED_WITH')
+RETURN [n IN nodes(path) | n.name] AS names,
+       [n IN nodes(path) | n.uid] AS uids,
+       [r IN rels | r.relation] AS relations,
+       [r IN rels | r.quote] AS quotes,
+       [r IN rels | r.source_url] AS urls,
+       [r IN rels | r.outlet] AS outlets
+LIMIT $limit
+"""
+
+
+def _dedupe_paths(rows):
+    """Drop paths that revisit a name, which read as nonsense."""
+    clean = []
+    for row in rows:
+        names = row.get("names") or []
+        if len(set(names)) == len(names):
+            clean.append(row)
+    return clean
+
+
+@app.get("/api/connections")
+async def all_connections(limit: int = Query(20, ge=1, le=60)):
+    """Chains of separately recorded facts that meet at a shared name."""
+    rows = await cypher(SIMPLE_PATHS, limit=min(limit * 25, 900))
+    chains = connections.build(_dedupe_paths(rows))[:limit]
+    shapes = {}
+    for c in chains:
+        shapes[c["label"]] = shapes.get(c["label"], 0) + 1
+    if chains:
+        top = max(shapes, key=shapes.get)
+        summary = (
+            f"{len(chains)} chains found by walking between names that were "
+            f"reported separately. The most common shape is \"{top}\". "
+            "A chain is a route through the records. It is not a claim that "
+            "one step caused another."
+        )
+    else:
+        summary = ("No chains yet. They appear once two recorded facts share a "
+                   "name in the middle.")
+    return {"summary": summary, "shapes": shapes, "connections": chains}
+
+
+@app.get("/api/entity/{uid}/connections")
+async def entity_connections(uid: str, limit: int = Query(12, ge=1, le=40)):
+    """What the links around one name add up to."""
+    if not re.fullmatch(r"[a-f0-9]{6,32}", uid or ""):
+        raise HTTPException(400, "invalid id")
+    rows = await cypher(ENTITY_PATHS, uid=uid, limit=min(limit * 25, 600))
+    chains = connections.build(_dedupe_paths(rows))[:limit]
+    return {"connections": chains}
 
 
 @app.get("/api/cases")

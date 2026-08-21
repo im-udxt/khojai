@@ -4,6 +4,7 @@ import { use } from 'react';
 import Link from 'next/link';
 import { usePoll, ago } from '@/lib/api';
 import { Bars } from '@/components/Charts';
+import { ChainCard, type Chain } from '@/components/Chains';
 
 type Claim = {
   subject: string;
@@ -32,6 +33,10 @@ const pretty = (r: string) => r.toLowerCase().replace(/_/g, ' ');
 export default function CasePage({ params }: { params: Promise<{ uid: string }> }) {
   const { uid } = use(params);
   const { data, error } = usePoll<CaseDetail>(`/api/case/${uid}`, 60000);
+  const { data: chains } = usePoll<{ connections: Chain[] }>(
+    `/api/entity/${uid}/connections?limit=8`,
+    120000,
+  );
 
   if (error) return <p className="text-sm text-bad">That case was not found.</p>;
   if (!data) return <p className="text-sm text-dim">Opening the case.</p>;
@@ -79,6 +84,15 @@ export default function CasePage({ params }: { params: Promise<{ uid: string }> 
           <Bars rows={byRelation} />
         </section>
       </div>
+
+      {chains && chains.connections.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="label">What these links add up to</h2>
+          {chains.connections.map((c, i) => (
+            <ChainCard key={i} chain={c} />
+          ))}
+        </section>
+      )}
 
       <section className="card">
         <h2 className="label">Every recorded link</h2>
