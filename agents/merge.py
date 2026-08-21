@@ -44,10 +44,33 @@ KIND_WORDS = (entities.COMPANY_SUFFIXES | entities.GOVERNMENT_WORDS
               | entities.COURT_WORDS | entities.PARTY_WORDS
               | BODY_WORDS | ROLE_WORDS)
 
-# Titles and filler that do not change what a thing is.
-NOISE = {"the", "of", "and", "for", "in", "on", "at", "shri", "smt", "mr",
-         "mrs", "ms", "dr", "prof", "former", "ex", "chief", "prime",
-         "union", "cabinet", "senior", "late", "his", "her"}
+# What one name may have that the other does not, and still be folded without
+# being asked about.
+#
+# This list used to work the other way round: fold unless the extra words are
+# in a list of words known to change the meaning. That is the wrong direction
+# and it did real damage. It folded "Nationalist Congress Party" into
+# "Congress Party" and "Tamil Nadu Social Welfare" into "Tamil Nadu Finance",
+# because no denylist can hold every word that matters. Naming the small set
+# of words that genuinely do not matter is the only safe direction: anything
+# outside it now goes to review instead.
+#
+# It is deliberately shorter than it could be. "Cabinet" and "chief" were on
+# it once, which made "Karnataka cabinet" and "Karnataka" look like the same
+# name. Merging cannot be undone, so a word only belongs here when it can
+# never change which thing is being named.
+FILLER = {"the", "of", "and", "for", "in", "on", "at",
+          "shri", "smt", "sri", "sh", "mr", "mrs", "ms", "dr", "prof"}
+
+# The same set is used to decide which words to ignore when comparing two
+# names, so the two can never drift apart.
+NOISE = FILLER
+
+
+def is_filler(word):
+    """A word that can differ between two spellings of the same name."""
+    return word in FILLER or len(word) == 1
+
 
 TOKEN_RE = re.compile(r"[a-z0-9]+")
 
@@ -125,15 +148,13 @@ def judge(a, b):
     small, large = (ta, tb) if len(ta) < len(tb) else (tb, ta)
     if small < large:
         extra = large - small
-        if extra & KIND_WORDS:
-            return "review", "one contains the other, but the extra words change the kind"
         if len(small) == 1:
             # A single word inside a longer name is usually a family name or
             # a place, and is the shape that produces the worst mistakes.
             return "review", "one name is a single word inside the other"
-        if not any(len(t) >= 4 for t in small):
-            return "review", "the shared part is too short to be sure"
-        return "auto", "one name is the other with filler words"
+        if all(is_filler(word) for word in extra):
+            return "auto", "one name is the other with an initial or a title"
+        return "review", "one name contains the other, with words that may matter"
 
     shared = len(ta & tb)
     union = len(ta | tb)

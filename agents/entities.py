@@ -117,6 +117,24 @@ def is_junk(name):
     words = [w for w in re.split(r"\W+", low) if w]
     if words and all(w in STOPWORDS for w in words):
         return True
+
+    # Sentence fragments the model returned as if they were names. These are
+    # what put "ten persons including Sachin Waze and others" into the graph
+    # as a node, which then pulled two unrelated people together when
+    # duplicate names were folded.
+    parts = text.split()
+    if "," in text:
+        return True
+    if len(parts) > 6:
+        return True
+    if parts and parts[0][:1].islower():
+        # "for Roads and Buildings", "ten persons including". A name does not
+        # begin with a lowercase word.
+        return True
+    if set(w.strip(".,") for w in low.split()) & {
+            "including", "others", "other", "persons", "along", "alias",
+            "namely", "etc", "various", "several"}:
+        return True
     return False
 
 

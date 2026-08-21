@@ -98,8 +98,12 @@ def upsert_entity(ent):
                      THEN $type ELSE e.type END,
             e.aliases = CASE WHEN $name IN coalesce(e.aliases, [])
                         THEN e.aliases ELSE coalesce(e.aliases, []) + $name END,
+            // Prefer the fuller spelling, but only up to a point. Taking the
+            // longest name outright meant one sentence fragment could become
+            // the label for a name that was otherwise recorded correctly.
             e.name = CASE WHEN size($name) > size(coalesce(e.name, ''))
-                     THEN $name ELSE e.name END
+                           AND size($name) <= 60
+                      THEN $name ELSE e.name END
         """,
         uid=ent["uid"], name=ent["name"], key=ent["key"], type=ent["type"],
         ts=now().isoformat(),
