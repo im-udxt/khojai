@@ -92,6 +92,10 @@ def upsert_entity(ent):
                       e.aliases = [$name]
         SET e.last_seen = datetime($ts),
             e.mentions = coalesce(e.mentions, 0) + 1,
+            // Let a later, more specific reading replace a vague one, so the
+            // graph corrects itself as a name is seen again.
+            e.type = CASE WHEN coalesce(e.type,'Topic') = 'Topic' AND $type <> 'Topic'
+                     THEN $type ELSE e.type END,
             e.aliases = CASE WHEN $name IN coalesce(e.aliases, [])
                         THEN e.aliases ELSE coalesce(e.aliases, []) + $name END,
             e.name = CASE WHEN size($name) > size(coalesce(e.name, ''))

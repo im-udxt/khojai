@@ -186,7 +186,10 @@ def canonical(name, hint=None):
         "key": key,
         "name": display,
         "type": etype,
-        "uid": hashlib.sha1(f"{etype}:{key}".encode()).hexdigest()[:16],
+        # The id comes from the name alone. Including the type meant that
+        # improving the typing rules split one name into two nodes and
+        # scattered its links.
+        "uid": hashlib.sha1(key.encode()).hexdigest()[:16],
     }
 
 
