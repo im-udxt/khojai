@@ -102,6 +102,18 @@ def _normalise(text):
     return WS.sub(" ", (text or "")).strip().lower()
 
 
+# Models that reason out loud before answering. Ollama puts that reasoning in
+# a separate field and leaves the answer empty, so a schema that is obeyed
+# perfectly still arrives as nothing. Asking them not to think is what makes
+# them usable here: we want the sentence copied, not an argument about it.
+THINKING_MODELS = ("qwen3", "deepseek-r1", "magistral", "phi4-reasoning")
+
+
+def thinks(model):
+    name = (model or "").lower()
+    return any(name.startswith(prefix) for prefix in THINKING_MODELS)
+
+
 def call_model(prompt, system=SYSTEM, json_mode=True, timeout=None, schema=None):
     payload = {
         "model": config.LLM_MODEL,
@@ -110,14 +122,28 @@ def call_model(prompt, system=SYSTEM, json_mode=True, timeout=None, schema=None)
         "stream": False,
         "options": {"temperature": 0, "num_ctx": config.LLM_CONTEXT},
     }
+    if thinks(config.LLM_MODEL):
+        payload["think"] = False
     if schema:
         payload["format"] = schema
     elif json_mode:
         payload["format"] = "json"
     resp = httpx.post(f"{config.OLLAMA_URL}/api/generate", json=payload,
                       timeout=timeout or config.LLM_TIMEOUT)
+    if resp.status_code == 400 and "think" in payload:
+        # An older Ollama, or a model that does not take the option at all.
+        payload.pop("think")
+        resp = httpx.post(f"{config.OLLAMA_URL}/api/generate", json=payload,
+                          timeout=timeout or config.LLM_TIMEOUT)
     resp.raise_for_status()
-    return resp.json().get("response", "").strip()
+    body = resp.json()
+    answer = (body.get("response") or "").strip()
+    if not answer:
+        # Some builds ignore think=False and answer in the thinking field
+        # anyway. The reply is still there, so use it rather than dropping
+        # the whole article.
+        answer = (body.get("thinking") or "").strip()
+    return answer
 
 
 def model_ready():
@@ -211,6 +237,39 @@ def claims_from(doc):
             "object": obj,
             "quote": quote,
         })
+    return _one_per_pair(out)
+
+
+def _one_per_pair(claims):
+    """Keep one relation for each pair of names in an article.
+
+    A model that is unsure does not say so. It offers every relation it can
+    think of for the same two names: on one test article a larger model
+    returned that the same person had received a contract from a company,
+    owned it, approved it, met it and donated to it, all from one sentence.
+    Five of those are invented, and the fact that they contradict each other
+    is the evidence for that.
+
+    So a pair gets one relation per article. Where the model offered three or
+    more, it was guessing, and the pair drops to the honest label instead of
+    keeping whichever guess happened to come first.
+    """
+    order, seen = [], {}
+    for claim in claims:
+        pair = tuple(sorted((claim["subject"]["uid"], claim["object"]["uid"])))
+        if pair not in seen:
+            seen[pair] = {"claim": claim, "relations": set()}
+            order.append(pair)
+        seen[pair]["relations"].add(claim["relation"])
+
+    out = []
+    for pair in order:
+        entry = seen[pair]
+        claim = entry["claim"]
+        specific = entry["relations"] - {"MENTIONED_WITH"}
+        if len(specific) >= 3:
+            claim = dict(claim, relation="MENTIONED_WITH")
+        out.append(claim)
     return out
 
 
