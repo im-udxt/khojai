@@ -9,6 +9,8 @@ import time
 import config
 import db
 import health
+import merge
+import metrics
 import pipeline
 import sources
 import telegram_bot
@@ -46,6 +48,7 @@ def main():
 
     db.ensure_schema()
     health.publish()
+    metrics.publish()
     db.activity("system", "started")
 
     stop = threading.Event()
@@ -54,10 +57,12 @@ def main():
         threading.Thread(target=pipeline.crawl_loop, args=(stop,), name="crawler", daemon=True),
         threading.Thread(target=pipeline.worker_loop, args=(stop,), name="worker", daemon=True),
         threading.Thread(target=markets_loop, args=(stop,), name="markets", daemon=True),
+        threading.Thread(target=metrics.loop, args=(stop,), name="metrics", daemon=True),
+        threading.Thread(target=merge.loop, args=(stop,), name="merge", daemon=True),
     ]
     for t in threads:
         t.start()
-    log.info("crawler, worker and health checks running")
+    log.info("crawler, worker, health, metrics and merge threads running")
 
     def shutdown(signum, frame):
         log.info("shutting down")

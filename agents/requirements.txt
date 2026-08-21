@@ -6,3 +6,4 @@ neo4j==5.25.0
 redis==5.2.0
 python-telegram-bot==21.7
 python-dateutil==2.9.0.post0
+psutil==6.1.0
