@@ -150,6 +150,13 @@ async def stats():
         "MATCH (e:Entity) WITH count(e) AS entities "
         "MATCH ()-[r:CLAIM]->() RETURN entities, count(r) AS claims")
     row = totals[0] if totals else {"entities": 0, "claims": 0}
+
+    def lifetime(name):
+        try:
+            return int(rds.get(f"khoj:total:{name}") or 0)
+        except Exception:
+            return 0
+
     return {
         "today": {
             "seen": counter("seen"),
@@ -159,6 +166,16 @@ async def stats():
             "duplicates": counter("duplicate"),
         },
         "total": {"entities": row["entities"], "claims": row["claims"]},
+        # Counting started when running totals were added, not when the
+        # project did, so the date is carried with the numbers.
+        "ever": {
+            "seen": lifetime("seen"),
+            "processed": lifetime("processed"),
+            "claims": lifetime("claims"),
+            "duplicates": lifetime("duplicate"),
+            "merged": lifetime("merged"),
+            "since": (rds.get("khoj:total:since") or "") if rds else "",
+        },
     }
 
 
@@ -498,3 +515,178 @@ async def claims(limit: int = Query(40, ge=1, le=100)):
         "r.source_url AS url, r.outlet AS outlet, toString(r.created) AS created "
         "ORDER BY r.created DESC LIMIT $limit", limit=limit)
     return {"claims": rows}
+
+
+@app.get("/api/machine")
+async def machine():
+    """Load, disk and running totals, written by the agents container.
+
+    The API does not measure anything itself. It reads the last reading the
+    agents container took, and says how old it is, so a stale figure is
+    obvious rather than being presented as current.
+    """
+    try:
+        raw = rds.get("khoj:machine")
+    except Exception:
+        raw = None
+    if not raw:
+        return {"available": False,
+                "note": "the agents container has not reported a reading yet"}
+    snap = json.loads(raw)
+    age = time.time() - (snap.get("at") or 0)
+    snap["available"] = True
+    snap["age_seconds"] = int(age)
+    snap["fresh"] = age < 180
+    if not snap["fresh"]:
+        snap["note"] = (f"this reading is {int(age)} seconds old, "
+                        "so the agents container may have stopped")
+    return snap
+
+
+@app.get("/api/watchlist")
+async def watchlist(limit: int = Query(30, ge=1, le=100)):
+    """Names being followed and the links that touched them."""
+    names, hits = [], []
+    try:
+        raw = rds.hgetall("khoj:watch") or {}
+        for value in raw.values():
+            try:
+                names.append(json.loads(value))
+            except (ValueError, TypeError):
+                continue
+        names.sort(key=lambda w: -(int(w.get("hits") or 0)))
+    except Exception:
+        pass
+    try:
+        hits = [json.loads(r) for r in rds.lrange("khoj:watch:hits", 0, limit - 1)]
+    except Exception:
+        pass
+    return {
+        "watching": names,
+        "hits": hits,
+        "note": ("Names are followed from Telegram. This page shows what is "
+                 "being followed and what has come in."),
+    }
+
+
+@app.get("/api/merges")
+async def merge_log(limit: int = Query(40, ge=1, le=100)):
+    """What was folded together, and what is still waiting for a decision.
+
+    Merging is the one thing here that removes something, so it is written
+    down. Every fold is listed with the rule that caused it.
+    """
+    folded, waiting = [], []
+    try:
+        folded = [json.loads(r) for r in rds.lrange("khoj:merges", 0, limit - 1)]
+    except Exception:
+        pass
+    try:
+        raw = rds.hgetall("khoj:merge:review") or {}
+        for value in raw.values():
+            try:
+                waiting.append(json.loads(value))
+            except (ValueError, TypeError):
+                continue
+        waiting.sort(key=lambda r: -(r.get("ts") or 0))
+    except Exception:
+        pass
+    automatic = sum(1 for f in folded if f.get("automatic"))
+    return {
+        "merged": folded,
+        "waiting": waiting[:60],
+        "summary": (
+            f"{len(folded)} recent merges, {automatic} of them made without "
+            f"asking. {len(waiting)} pairs were too close to call and are "
+            "waiting for a decision."
+        ) if folded or waiting else
+        "No duplicate names have been folded together yet.",
+    }
+
+
+@app.get("/api/sources")
+async def source_list():
+    """Which sources are producing and which are silent."""
+    snap = {}
+    try:
+        raw = rds.get("khoj:machine")
+        if raw:
+            snap = json.loads(raw)
+    except Exception:
+        pass
+    rows = snap.get("sources") or []
+    dead = [r for r in rows if not r.get("items")]
+    return {
+        "sources": rows,
+        "by_outlet": snap.get("by_outlet_seen") or [],
+        "claims_by_outlet": snap.get("by_outlet_claims") or [],
+        "summary": (
+            f"{len(rows)} sources have been tried. {len(dead)} returned "
+            "nothing the last time. A source that returns nothing is usually "
+            "one that changed its address or now needs a browser."
+        ) if rows else "No source has been tried yet.",
+    }
+
+
+PARTY_LINKS = """
+MATCH (p:Entity {type:'Party'})-[r:CLAIM]-(other:Entity)
+WHERE r.relation <> 'MENTIONED_WITH'
+RETURN p.uid AS uid, p.name AS name, count(r) AS links,
+       count(DISTINCT r.outlet) AS outlets,
+       collect(DISTINCT other.name)[..8] AS around,
+       collect(DISTINCT r.relation)[..8] AS relations
+ORDER BY links DESC LIMIT $limit
+"""
+
+PARTY_MONEY = """
+MATCH (a:Entity)-[r:CLAIM]->(b:Entity)
+WHERE (a.type = 'Party' OR b.type = 'Party')
+  AND r.relation IN ['DONATED_TO','AWARDED_CONTRACT','RECEIVED_CONTRACT',
+                     'OWNS','APPOINTED','APPROVED','RULED_ON']
+RETURN a.name AS subject, a.uid AS subject_uid, r.relation AS relation,
+       b.name AS object, b.uid AS object_uid, r.quote AS quote,
+       r.source_url AS url, r.outlet AS outlet, toString(r.created) AS created
+ORDER BY r.created DESC LIMIT $limit
+"""
+
+PARTY_PATHS = """
+MATCH path = (a:Entity {type:'Party'})-[rels:CLAIM*1..3]-(b:Entity)
+WHERE ALL(r IN rels WHERE r.relation <> 'MENTIONED_WITH')
+RETURN [n IN nodes(path) | n.name] AS names,
+       [n IN nodes(path) | n.uid] AS uids,
+       [n IN nodes(path) | n.type] AS types,
+       [r IN rels | r.relation] AS relations,
+       [r IN rels | r.quote] AS quotes,
+       [r IN rels | r.source_url] AS urls,
+       [r IN rels | r.outlet] AS outlets,
+       [r IN rels | toString(r.created)] AS dates
+LIMIT $limit
+"""
+
+
+@app.get("/api/parties")
+async def parties(limit: int = Query(15, ge=1, le=40)):
+    """Everything recorded that touches a political party.
+
+    Parties get their own page because money and decisions around them are
+    the links most worth reading, not because anything here is aimed at one
+    of them. The same rules and the same sourcing apply as everywhere else.
+    """
+    rows = await cypher(PARTY_LINKS, limit=limit)
+    money = await cypher(PARTY_MONEY, limit=40)
+    chains = connections.build(await _add_backing(_dedupe_paths(
+        await cypher(PARTY_PATHS, limit=400))))[:limit]
+
+    total_links = sum(r["links"] for r in rows)
+    if rows:
+        summary = (
+            f"{len(rows)} political parties appear in {total_links} recorded "
+            f"links. {len(money)} of those involve money, a contract, an "
+            "appointment or a decision. Everything here is a link an article "
+            "stated, not a finding."
+        )
+    else:
+        summary = ("No party has been recorded yet. A name becomes a party "
+                   "when it matches a known party or carries a party word.")
+    return {"summary": summary, "parties": rows, "money": money,
+            "connections": chains}
