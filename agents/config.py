@@ -22,6 +22,10 @@ ARCHIVE_DIR = os.environ.get("ARCHIVE_DIR", "/archive")
 CRAWL_INTERVAL = int(os.environ.get("CRAWL_INTERVAL_SECONDS", "180"))
 MAX_DOCS_PER_SWEEP = int(os.environ.get("MAX_DOCS_PER_SWEEP", "400"))
 EXTRACT_MIN_CHARS = int(os.environ.get("EXTRACT_MIN_CHARS", "280"))
+# Second model pass over each claim. Off by default: with a 3B model it
+# dropped correct claims as often as it caught wrong ones. Worth trying
+# again on a larger model.
+VERIFY_CLAIMS = os.environ.get("VERIFY_CLAIMS", "false").lower() == "true"
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_ALLOWED_USER = os.environ.get("TELEGRAM_ALLOWED_USER_ID", "").strip()

@@ -199,6 +199,11 @@ def claims_from(doc):
         if relation not in RELATIONS:
             continue
 
+        # Fall back to the honest label rather than dropping the pair, so a
+        # real co-appearance is not lost to a badly chosen relation.
+        if relation != "MENTIONED_WITH" and not plausible(subject, relation, obj):
+            relation = "MENTIONED_WITH"
+
         out.append({
             "subject": subject,
             "relation": relation,
@@ -235,3 +240,103 @@ def summarise(question, evidence_lines):
     except Exception as exc:
         log.warning("summary failed: %s", str(exc)[:120])
     return "Summary unavailable. The documented facts are listed below."
+
+VERIFY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "correct": {"type": "boolean"},
+        "better": {"type": "string", "enum": RELATIONS + ["NONE"]},
+    },
+    "required": ["correct", "better"],
+}
+
+VERIFY_PROMPT = """Here is one sentence from a news article.
+
+SENTENCE: {quote}
+
+Someone claims this sentence says:
+  {subject} -- {relation} --> {object}
+
+Does the sentence actually state that? Judge only the sentence.
+If it does, set correct to true and better to NONE.
+If it does not, set correct to false and put the relation the sentence really
+states, or NONE if the sentence states no relation between those two.
+"""
+
+
+def verify(claim):
+    """Second look at one claim, using only its quote.
+
+    The first pass reads a whole article and often picks a relation that is
+    nearly right. Asking again with just the sentence catches that. This is
+    what stops wrong links from being chained into confident nonsense.
+    """
+    try:
+        raw = call_model(
+            VERIFY_PROMPT.format(
+                quote=claim["quote"][:600],
+                subject=claim["subject"]["name"],
+                relation=claim["relation"],
+                object=claim["object"]["name"]),
+            system="You check whether a sentence states a relationship. JSON only.",
+            schema=VERIFY_SCHEMA,
+            timeout=60)
+    except Exception as exc:
+        log.debug("verify call failed, keeping claim: %s", str(exc)[:80])
+        return claim
+    data = _parse(raw)
+    if not isinstance(data, dict):
+        return claim
+    if data.get("correct") is True:
+        return claim
+    better = (data.get("better") or "NONE").upper()
+    if better in RELATIONS and better != claim["relation"]:
+        claim["relation"] = better
+        return claim
+    return None
+
+# Which relations make sense between which kinds of name. A 3B model happily
+# writes "Supreme Court received a contract from Delhi High Court", and asking
+# it to check its own work proved unreliable in both directions: it dropped
+# correct claims and mis-corrected wrong ones. These rules are deterministic,
+# free, and catch exactly that class of nonsense.
+SUBJECT_MUST_BE = {
+    "WORKS_AT": {"Person"},
+    "LEADS": {"Person"},
+    "MEMBER_OF": {"Person"},
+    "RESIGNED_FROM": {"Person"},
+    "RULED_ON": {"Court"},
+    "APPOINTED": {"Person", "Government", "Company", "Court"},
+    "DONATED_TO": {"Person", "Company"},
+    "AWARDED_CONTRACT": {"Government", "Company"},
+    "RECEIVED_CONTRACT": {"Company", "Person"},
+    "FILED_CASE": {"Person", "Company", "Government"},
+}
+OBJECT_MUST_BE = {
+    "WORKS_AT": {"Company", "Government", "Court"},
+    "LEADS": {"Company", "Government", "Court"},
+    "MEMBER_OF": {"Company", "Government", "Court"},
+    "RESIGNED_FROM": {"Company", "Government", "Court"},
+    "INVESTIGATED_BY": {"Government", "Court"},
+    "CHARGED_BY": {"Government", "Court"},
+    "AWARDED_CONTRACT": {"Company", "Person"},
+    "RECEIVED_CONTRACT": {"Government", "Company"},
+    "DONATED_TO": {"Person", "Company", "Government"},
+}
+# A contract or a ruling between two courts is a sign the relation was guessed.
+SAME_TYPE_BANNED = {"RECEIVED_CONTRACT", "AWARDED_CONTRACT", "DONATED_TO",
+                    "WORKS_AT", "LEADS", "MEMBER_OF"}
+
+
+def plausible(subject, relation, obj):
+    """False when the relation cannot hold between these two kinds of name."""
+    s_type, o_type = subject["type"], obj["type"]
+    allowed_s = SUBJECT_MUST_BE.get(relation)
+    if allowed_s and s_type not in allowed_s:
+        return False
+    allowed_o = OBJECT_MUST_BE.get(relation)
+    if allowed_o and o_type not in allowed_o:
+        return False
+    if relation in SAME_TYPE_BANNED and s_type == o_type and s_type in {"Court", "Government"}:
+        return False
+    return True

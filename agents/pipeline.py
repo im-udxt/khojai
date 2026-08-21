@@ -199,6 +199,15 @@ def process_one(doc):
         "outlet": doc.get("outlet"), "published": doc.get("published"),
     }
     claims = extract.claims_from(doc)
+    if config.VERIFY_CLAIMS:
+        checked = []
+        for claim in claims:
+            kept = extract.verify(claim)
+            if kept:
+                checked.append(kept)
+            else:
+                db.stat("rejected_on_check")
+        claims = checked
     saved = 0
     for claim in claims:
         if db.save_claim(claim["subject"], claim["relation"], claim["object"],
