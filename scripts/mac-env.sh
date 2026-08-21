@@ -23,3 +23,15 @@ if ! colima status >/dev/null 2>&1; then
   echo "colima is not running. starting it."
   colima start --cpu 3 --memory 4 --disk 40
 fi
+
+# Only docker-compose was linked into PATH on this machine, so a plain
+# "docker" command fails even though the engine is running. Point at the
+# binary that is actually installed, without going back to Docker Desktop's
+# credential helper.
+for candidate in /Applications/Docker.app/Contents/Resources/bin/docker                  /opt/homebrew/bin/docker /usr/local/bin/docker; do
+  if [ -x "$candidate" ]; then
+    export DOCKER_BIN="$candidate"
+    alias docker="$candidate"
+    break
+  fi
+done
