@@ -12,6 +12,7 @@ facts that happen to meet at a name, and every sentence says so.
 # Relations grouped by what they mean, so a chain can be described in words
 # rather than as a list of arrow labels.
 MONEY = {"DONATED_TO", "AWARDED_CONTRACT", "RECEIVED_CONTRACT", "OWNS"}
+PARTY_LINKED = {"MEMBER_OF", "LEADS", "DONATED_TO", "APPOINTED"}
 POWER = {"APPROVED", "BLOCKED", "RULED_ON", "APPOINTED"}
 TROUBLE = {"INVESTIGATED_BY", "CHARGED_BY", "ACCUSED_OF", "FILED_CASE", "NAMED_IN"}
 ROLE = {"WORKS_AT", "LEADS", "MEMBER_OF", "APPOINTED", "RESIGNED_FROM"}
@@ -43,9 +44,18 @@ def phrase(relation):
     return PHRASE.get(relation, (relation or "").lower().replace("_", " "))
 
 
-def classify(chain):
+def classify(chain, types=None):
     """Give the chain a short label describing the shape it makes."""
     relations = set(chain)
+    kinds = set(types or [])
+    if "Party" in kinds and relations & MONEY:
+        return ("party and money",
+                "A political party sits on the chain, and another step is "
+                "money, a contract or ownership.")
+    if "Party" in kinds and relations & POWER:
+        return ("party and a decision",
+                "A political party sits on the chain, and another step is a "
+                "decision or an appointment.")
     if relations & MONEY and relations & POWER:
         return ("money then decision",
                 "One step is money or a contract. Another is a decision or an "
@@ -89,6 +99,44 @@ def describe(names, relations, outlets):
     return sentence, caution, where
 
 
+def confidence(outlets_backing):
+    """How much independent reporting sits behind one step.
+
+    One outlet can be wrong. Two agreeing is meaningfully different. This is
+    reported per step, and a chain is only as strong as its weakest step.
+    """
+    n = outlets_backing or 1
+    if n >= 3:
+        return {"level": "well sourced", "outlets": n,
+                "note": f"{n} outlets report this independently."}
+    if n == 2:
+        return {"level": "corroborated", "outlets": n,
+                "note": "Two outlets report this independently."}
+    return {"level": "single source", "outlets": 1,
+            "note": "Only one outlet reports this. Read it before relying on it."}
+
+
+def timeline(steps):
+    """Put the steps in the order they were published, when dates allow.
+
+    Order is what turns a set of links into a sequence. Without it, an
+    appointment and a contract are just two facts.
+    """
+    dated = [s for s in steps if s.get("when")]
+    if len(dated) < 2:
+        return {"ordered": False, "note": "Not enough dates to place these in order.",
+                "events": []}
+    order = sorted(dated, key=lambda s: s["when"])
+    events = [{"when": s["when"], "what": f"{s['from']} {s['phrase']} {s['to']}"}
+              for s in order]
+    same = order[0]["when"][:10] == order[-1]["when"][:10]
+    note = ("All of these were reported on the same day, so the order says "
+            "little." if same else
+            f"Reported between {order[0]['when'][:10]} and {order[-1]['when'][:10]}. "
+            "Publication order is not the order events happened.")
+    return {"ordered": True, "note": note, "events": events}
+
+
 def build(rows):
     """Shape raw path rows into readable chains, best first."""
     out, seen = [], set()
@@ -103,20 +151,29 @@ def build(rows):
         seen.add(key)
 
         outlets = row.get("outlets") or []
-        label, why = classify(relations)
+        label, why = classify(relations, row.get("types"))
         sentence, caution, where = describe(names, relations, outlets)
+        quotes = row.get("quotes") or [None] * len(relations)
+        urls = row.get("urls") or [None] * len(relations)
+        outlet_list = row.get("outlets") or [None] * len(relations)
+        backing = row.get("backing") or [1] * len(relations)
+        dates = row.get("dates") or [None] * len(relations)
         steps = [
             {
                 "from": names[i],
                 "relation": relations[i],
                 "phrase": phrase(relations[i]),
                 "to": names[i + 1],
-                "quote": (row.get("quotes") or [None] * len(relations))[i],
-                "url": (row.get("urls") or [None] * len(relations))[i],
-                "outlet": (row.get("outlets") or [None] * len(relations))[i],
+                "quote": quotes[i] if i < len(quotes) else None,
+                "url": urls[i] if i < len(urls) else None,
+                "outlet": outlet_list[i] if i < len(outlet_list) else None,
+                "outlets_backing": backing[i] if i < len(backing) else 1,
+                "confidence": confidence(backing[i] if i < len(backing) else 1),
+                "when": dates[i] if i < len(dates) else None,
             }
             for i in range(len(relations))
         ]
+        weakest = min([s["outlets_backing"] or 1 for s in steps] or [1])
         out.append({
             "label": label,
             "why": why,
@@ -126,11 +183,17 @@ def build(rows):
             "names": names,
             "uids": row.get("uids") or [],
             "steps": steps,
+            "types": row.get("types") or [],
+            "confidence": confidence(weakest),
+            "weakest_backing": weakest,
+            "timeline": timeline(steps),
             "outlet_count": len({o for o in outlets if o}),
             "hops": len(relations),
         })
 
-    rank = {"money then decision": 0, "money and a case": 1, "decision and a case": 2,
-            "shared people": 3, "case link": 4, "money link": 5, "plain link": 6}
+    rank = {"party and money": 0, "party and a decision": 1,
+            "money then decision": 2, "money and a case": 3,
+            "decision and a case": 4, "shared people": 5, "case link": 6,
+            "money link": 7, "plain link": 8}
     out.sort(key=lambda c: (rank.get(c["label"], 9), -c["outlet_count"], c["hops"]))
     return out

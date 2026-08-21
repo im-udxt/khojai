@@ -15,6 +15,7 @@ const COLOR: Record<string, string> = {
   Government: '#fbbf24',
   Court: '#f87171',
   Place: '#c084fc',
+  Party: '#f472b6',
   Topic: '#9195a1',
   Event: '#fb923c',
 };

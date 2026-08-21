@@ -56,7 +56,24 @@ MONEY_RE = re.compile(r"^(rs\.?|inr|usd|\$|₹)\s*[\d,.]+", re.IGNORECASE)
 WS_RE = re.compile(r"\s+")
 PUNCT_RE = re.compile(r"[\"'`''\"\"()\[\]{}<>|\\]")
 
-VALID_TYPES = {"Person", "Company", "Government", "Court", "Place", "Event", "Topic"}
+VALID_TYPES = {"Person", "Company", "Government", "Court", "Place", "Party",
+               "Event", "Topic"}
+
+# Party names carry weight in this material, so they get their own type rather
+# than being filed under Government or Company.
+PARTY_WORDS = {
+    "party", "dal", "sena", "congress", "morcha", "manch", "kazhagam",
+    "sangh", "samaj", "samiti", "front", "league", "union",
+}
+PARTY_NAMES = {
+    "bjp", "bharatiya janata party", "indian national congress", "congress",
+    "aap", "aam aadmi party", "dmk", "aiadmk", "tmc", "trinamool congress",
+    "ncp", "shiv sena", "jdu", "janata dal united", "rjd", "sp",
+    "samajwadi party", "bsp", "bahujan samaj party", "cpi", "cpim",
+    "cpi m", "left front", "ysrcp", "trs", "brs", "bjd", "akali dal",
+    "shiromani akali dal", "national conference", "pdp", "mim", "aimim",
+    "jmm", "inld", "rld", "tdp", "janasena", "mns", "iuml", "kerala congress",
+}
 
 
 def clean(name):
@@ -108,6 +125,12 @@ def infer_type(name, hint=None):
     text = clean(name)
     low = text.lower()
     words = set(re.split(r"\W+", low)) - {""}
+
+    stripped = re.sub(r"[^a-z0-9 ]", "", low).strip()
+    if stripped in PARTY_NAMES:
+        return "Party"
+    if words & PARTY_WORDS and not (words & COURT_WORDS):
+        return "Party"
 
     if words & COURT_WORDS:
         return "Court"

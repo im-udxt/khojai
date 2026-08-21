@@ -4,7 +4,7 @@ import { Suspense, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import LinkMap from '@/components/Map';
 
-const TYPES = ['Person', 'Company', 'Government', 'Court', 'Place', 'Topic'];
+const TYPES = ['Person', 'Party', 'Company', 'Government', 'Court', 'Place', 'Topic'];
 
 function Inner() {
   const params = useSearchParams();

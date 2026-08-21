@@ -243,7 +243,7 @@ async def graph(entity: str | None = None,
         params["name"] = clean_text(entity, "entity").lower()
         where.append("(toLower(a.name) CONTAINS $name OR toLower(b.name) CONTAINS $name)")
     if type:
-        if type not in {"Person", "Company", "Government", "Court", "Place", "Topic", "Event"}:
+        if type not in {"Person", "Party", "Company", "Government", "Court", "Place", "Topic", "Event"}:
             raise HTTPException(400, "invalid type")
         params["type"] = type
         where.append("(a.type = $type AND b.type = $type)")
@@ -268,10 +268,12 @@ WHERE a.uid < b.uid
   AND ALL(r IN rels WHERE r.relation <> 'MENTIONED_WITH')
 RETURN [n IN nodes(path) | n.name] AS names,
        [n IN nodes(path) | n.uid] AS uids,
+       [n IN nodes(path) | n.type] AS types,
        [r IN rels | r.relation] AS relations,
        [r IN rels | r.quote] AS quotes,
        [r IN rels | r.source_url] AS urls,
-       [r IN rels | r.outlet] AS outlets
+       [r IN rels | r.outlet] AS outlets,
+       [r IN rels | toString(r.created)] AS dates
 LIMIT $limit
 """
 
@@ -280,11 +282,20 @@ MATCH path = (a:Entity {uid:$uid})-[rels:CLAIM*1..3]-(b:Entity)
 WHERE ALL(r IN rels WHERE r.relation <> 'MENTIONED_WITH')
 RETURN [n IN nodes(path) | n.name] AS names,
        [n IN nodes(path) | n.uid] AS uids,
+       [n IN nodes(path) | n.type] AS types,
        [r IN rels | r.relation] AS relations,
        [r IN rels | r.quote] AS quotes,
        [r IN rels | r.source_url] AS urls,
-       [r IN rels | r.outlet] AS outlets
+       [r IN rels | r.outlet] AS outlets,
+       [r IN rels | toString(r.created)] AS dates
 LIMIT $limit
+"""
+
+BACKING = """
+UNWIND $pairs AS pair
+MATCH (a:Entity {name: pair[0]})-[r:CLAIM {relation: pair[2]}]-(b:Entity {name: pair[1]})
+RETURN pair[0] AS a, pair[1] AS b, pair[2] AS rel,
+       count(DISTINCT r.outlet) AS outlets
 """
 
 
@@ -298,11 +309,44 @@ def _dedupe_paths(rows):
     return clean
 
 
+async def _add_backing(rows):
+    """Count how many independent outlets report each step of each path."""
+    pairs, seen = [], set()
+    for row in rows:
+        names = row.get("names") or []
+        relations = row.get("relations") or []
+        for i, rel in enumerate(relations):
+            if i + 1 < len(names):
+                key = (names[i], names[i + 1], rel)
+                if key not in seen:
+                    seen.add(key)
+                    pairs.append([names[i], names[i + 1], rel])
+    if not pairs:
+        return rows
+    try:
+        counts = await cypher(BACKING, pairs=pairs[:900])
+    except Exception as exc:
+        log.warning("backing lookup failed: %s", str(exc)[:100])
+        return rows
+    lookup = {(c["a"], c["b"], c["rel"]): c["outlets"] for c in counts}
+    for row in rows:
+        names = row.get("names") or []
+        relations = row.get("relations") or []
+        row["backing"] = [
+            lookup.get((names[i], names[i + 1], rel))
+            or lookup.get((names[i + 1], names[i], rel))
+            or 1
+            for i, rel in enumerate(relations) if i + 1 < len(names)
+        ]
+    return rows
+
+
 @app.get("/api/connections")
 async def all_connections(limit: int = Query(20, ge=1, le=60)):
     """Chains of separately recorded facts that meet at a shared name."""
-    rows = await cypher(SIMPLE_PATHS, limit=min(limit * 25, 900))
-    chains = connections.build(_dedupe_paths(rows))[:limit]
+    rows = await _add_backing(_dedupe_paths(
+        await cypher(SIMPLE_PATHS, limit=min(limit * 25, 900))))
+    chains = connections.build(rows)[:limit]
     shapes = {}
     for c in chains:
         shapes[c["label"]] = shapes.get(c["label"], 0) + 1
@@ -325,8 +369,9 @@ async def entity_connections(uid: str, limit: int = Query(12, ge=1, le=40)):
     """What the links around one name add up to."""
     if not re.fullmatch(r"[a-f0-9]{6,32}", uid or ""):
         raise HTTPException(400, "invalid id")
-    rows = await cypher(ENTITY_PATHS, uid=uid, limit=min(limit * 25, 600))
-    chains = connections.build(_dedupe_paths(rows))[:limit]
+    rows = await _add_backing(_dedupe_paths(
+        await cypher(ENTITY_PATHS, uid=uid, limit=min(limit * 25, 600))))
+    chains = connections.build(rows)[:limit]
     return {"connections": chains}
 
 

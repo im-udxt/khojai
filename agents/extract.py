@@ -33,7 +33,7 @@ RELATIONS = [
     "FILED_CASE", "NAMED_IN", "RULED_ON", "APPROVED", "BLOCKED",
     "MET_WITH", "DONATED_TO", "APPOINTED", "RESIGNED_FROM", "MENTIONED_WITH",
 ]
-TYPES = ["Person", "Company", "Government", "Court", "Place"]
+TYPES = ["Person", "Company", "Government", "Court", "Place", "Party"]
 
 # A schema, not a suggestion. Ollama constrains generation to this shape, so
 # the quote can never be left out and the relation can never be invented.
@@ -69,7 +69,8 @@ RECEIVED_CONTRACT, INVESTIGATED_BY, CHARGED_BY, ACCUSED_OF, FILED_CASE,
 NAMED_IN, RULED_ON, APPROVED, BLOCKED, MET_WITH, DONATED_TO, APPOINTED,
 RESIGNED_FROM
 
-Entity types: Person, Company, Government, Court, Place
+Entity types: Person, Company, Government, Court, Place, Party
+Party means a political party.
 
 Reply with this JSON shape and nothing else:
 {{"claims":[{{"subject":"name","subject_type":"Person","relation":"WORKS_AT","object":"name","object_type":"Company","quote":"the sentence from the article that says this"}}]}}
@@ -305,6 +306,7 @@ SUBJECT_MUST_BE = {
     "LEADS": {"Person"},
     "MEMBER_OF": {"Person"},
     "RESIGNED_FROM": {"Person"},
+    "LEADS_PARTY": {"Person"},
     "RULED_ON": {"Court"},
     "APPOINTED": {"Person", "Government", "Company", "Court"},
     "DONATED_TO": {"Person", "Company"},
@@ -313,15 +315,15 @@ SUBJECT_MUST_BE = {
     "FILED_CASE": {"Person", "Company", "Government"},
 }
 OBJECT_MUST_BE = {
-    "WORKS_AT": {"Company", "Government", "Court"},
-    "LEADS": {"Company", "Government", "Court"},
-    "MEMBER_OF": {"Company", "Government", "Court"},
-    "RESIGNED_FROM": {"Company", "Government", "Court"},
+    "WORKS_AT": {"Company", "Government", "Court", "Party"},
+    "LEADS": {"Company", "Government", "Court", "Party"},
+    "MEMBER_OF": {"Company", "Government", "Court", "Party"},
+    "RESIGNED_FROM": {"Company", "Government", "Court", "Party"},
     "INVESTIGATED_BY": {"Government", "Court"},
     "CHARGED_BY": {"Government", "Court"},
     "AWARDED_CONTRACT": {"Company", "Person"},
     "RECEIVED_CONTRACT": {"Government", "Company"},
-    "DONATED_TO": {"Person", "Company", "Government"},
+    "DONATED_TO": {"Person", "Company", "Government", "Party"},
 }
 # A contract or a ruling between two courts is a sign the relation was guessed.
 SAME_TYPE_BANNED = {"RECEIVED_CONTRACT", "AWARDED_CONTRACT", "DONATED_TO",
