@@ -20,6 +20,8 @@ COMPANY_SUFFIXES = {
     "industries", "enterprises", "ventures", "group", "technologies", "tech",
     "solutions", "services", "systems", "labs", "motors", "bank", "finance",
     "capital", "infra", "infrastructure", "energy", "power", "steel", "cement",
+    "ports", "port", "mills", "textiles", "pharma", "pharmaceuticals",
+    "chemicals", "minerals", "mining", "logistics", "telecom", "airlines",
 }
 
 GOVERNMENT_WORDS = {
@@ -31,6 +33,17 @@ GOVERNMENT_WORDS = {
 }
 
 COURT_WORDS = {"court", "tribunal", "bench", "judiciary", "nclt", "nclat", "itat"}
+
+# Bodies whose names carry no word that says what they are. The Reserve Bank
+# of India reads as a company because of "bank", and anything beginning with
+# "Union" is the central government rather than a union.
+KNOWN_GOVERNMENT = {
+    "reserve bank of india", "state bank of india", "securities and exchange board of india", "comptroller and auditor general of india",
+    "election commission of india", "niti aayog", "lokpal", "lokayukta",
+    "enforcement directorate", "central bureau of investigation",
+    "national investigation agency", "narcotics control bureau",
+    "central vigilance commission", "income tax department",
+}
 
 # Strings that are never useful entities on their own.
 STOPWORDS = {
@@ -61,9 +74,12 @@ VALID_TYPES = {"Person", "Company", "Government", "Court", "Place", "Party",
 
 # Party names carry weight in this material, so they get their own type rather
 # than being filed under Government or Company.
+# "Union" was on this list and had to come off. In Indian government naming
+# it means the central government, not a political one, so it typed the Union
+# Home Affairs Ministry and the Union Territories as parties.
 PARTY_WORDS = {
     "party", "dal", "sena", "congress", "morcha", "manch", "kazhagam",
-    "sangh", "samaj", "samiti", "front", "league", "union",
+    "sangh", "samaj", "samiti", "front", "league",
 }
 PARTY_NAMES = {
     "bjp", "bharatiya janata party", "indian national congress", "congress",
@@ -144,16 +160,23 @@ def infer_type(name, hint=None):
     low = text.lower()
     words = set(re.split(r"\W+", low)) - {""}
 
+    # A name that is a known party is a party whatever else it contains.
     stripped = re.sub(r"[^a-z0-9 ]", "", low).strip()
     if stripped in PARTY_NAMES:
         return "Party"
-    if words & PARTY_WORDS and not (words & COURT_WORDS):
-        return "Party"
+    if stripped in KNOWN_GOVERNMENT or stripped.startswith("union "):
+        return "Government"
 
+    # Court and government words are checked before the looser party words,
+    # because a name carrying both is far more often a state body than a
+    # party: "Congress Working Committee" is the exception, "Union Home
+    # Affairs Ministry" is the rule.
     if words & COURT_WORDS:
         return "Court"
     if words & GOVERNMENT_WORDS or low.startswith(("ministry of", "department of")):
         return "Government"
+    if words & PARTY_WORDS:
+        return "Party"
     if words & COMPANY_SUFFIXES:
         return "Company"
 
