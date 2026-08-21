@@ -26,8 +26,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/">Home</Link>
               <Link href="/cases">Cases</Link>
               <Link href="/connections">Connections</Link>
+              <Link href="/parties">Parties</Link>
               <Link href="/graph">Map</Link>
               <Link href="/insights">Insights</Link>
+              <Link href="/watchlist">Watchlist</Link>
               <Link href="/status">Status</Link>
             </nav>
             <div className="ml-auto w-full max-w-xs">

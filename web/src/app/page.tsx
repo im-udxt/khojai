@@ -25,7 +25,7 @@ const words = (relation: string) => relation.toLowerCase().replace(/_/g, ' ');
 export default function Home() {
   const { data: stats } = usePoll<Stats>('/api/stats', 30000);
   const { data: claims } = usePoll<{ claims: Claim[] }>('/api/claims?limit=25', 30000);
-  const { data: feed } = usePoll<{ activity: Activity[] }>('/api/activity?limit=25', 15000);
+  const { data: feed } = usePoll<{ activity: Activity[] }>('/api/activity?limit=60', 15000);
 
   const cells: [string, number | undefined][] = [
     ['Articles seen today', stats?.today.seen],
@@ -89,13 +89,22 @@ export default function Home() {
           </div>
         </section>
 
-        <aside className="card">
+        {/* The panel used to stretch to match the column beside it, which left
+            a tall empty box under a short list. It now sizes to its own
+            content, sticks while the page scrolls, and scrolls inside itself
+            once there is more than fits. */}
+        <aside className="card self-start lg:sticky lg:top-4">
           <h2 className="label">What it is doing</h2>
-          <div className="space-y-1.5 text-xs">
+          <div className="max-h-[70vh] space-y-2 overflow-y-auto pr-1 text-xs">
             {(feed?.activity || []).map((a, i) => (
-              <div key={i} className="flex gap-2">
-                <span className="w-16 shrink-0 text-dim">{a.actor}</span>
-                <span>{a.message}</span>
+              <div key={i} className="border-b border-edge pb-2 last:border-0">
+                <div className="flex items-baseline gap-2">
+                  <span className="shrink-0 text-dim">{a.actor}</span>
+                  <span className="ml-auto shrink-0 text-[10px] text-dim">
+                    {ago(a.ts)}
+                  </span>
+                </div>
+                <p className="mt-0.5 leading-snug">{a.message}</p>
               </div>
             ))}
             {!feed?.activity?.length && <p className="text-dim">Starting up.</p>}
