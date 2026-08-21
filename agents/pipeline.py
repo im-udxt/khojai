@@ -143,6 +143,7 @@ def collect(docs, priority=False):
     counts = {"in": len(docs), "new": 0, "relevant": 0, "queued": 0}
     for doc in docs:
         db.stat("seen")
+        db.count_outlet(doc.get("outlet"), "seen")
         if not doc.get("url") or seen_before(doc["url"]):
             continue
         counts["new"] += 1
@@ -170,10 +171,22 @@ def collect(docs, priority=False):
 
 
 def sweep():
-    """One pass over every feed."""
-    db.activity("crawler", "reading feeds")
-    docs = sources.read_feeds()[:config.MAX_DOCS_PER_SWEEP]
+    """One pass over the feeds, the topic searches and a few listing pages."""
+    db.activity("crawler", "reading feeds and searches")
+    docs = sources.read_feeds()
+
+    walked = []
+    try:
+        walked = sources.read_sites()
+        if walked:
+            db.activity("crawler",
+                        f"walked listing pages, {len(walked)} links to check")
+    except Exception as exc:
+        log.warning("site walk skipped: %s", str(exc)[:100])
+
+    docs = (docs + walked)[:config.MAX_DOCS_PER_SWEEP]
     counts = collect(docs)
+    counts["from_sites"] = len(walked)
     db.activity("crawler",
                 f"{counts['in']} items, {counts['new']} new, "
                 f"{counts['queued']} sent to the model")

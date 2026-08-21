@@ -6,6 +6,11 @@ logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO"),
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
+# httpx logs a line for every request. With one feed that was fine. With
+# dozens of feeds, topic searches and listing pages it buries everything
+# this project actually says, so it is raised to warnings only.
+for noisy in ("httpx", "httpcore", "urllib3"):
+    logging.getLogger(noisy).setLevel(logging.WARNING)
 
 NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://neo4j:7687")
 NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
