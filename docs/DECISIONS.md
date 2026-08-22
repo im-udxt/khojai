@@ -33,6 +33,60 @@ Two useful things came out of the test anyway:
   "mentioned with". That helps the model actually in use, not just the one
   rejected.
 
+## Growing the source list quietly broke the crawler
+
+The source list went from 26 to 65. The sweep still built one flat list of
+every feed item and cut it at `MAX_DOCS_PER_SWEEP`, which was 300.
+
+Feeds return in list order, so the cut landed inside the fifth source. Five
+sources were read in full and forty seven were never looked at. The walked
+listing pages were concatenated after the feeds, so CBI, PIB and NHRC were
+always past the cut and never once processed. The logs said so every four
+minutes and nobody read them:
+
+    300 items, 0 new, 0 sent to the model
+    walked listing pages, 116 links to check
+
+The status page reported healthy throughout, because health flags a worker
+idling while the queue is backed up, and here the queue was empty. A starved
+intake and a caught up one look identical from the queue.
+
+Three changes came out of it:
+
+- Take from every source in turn instead of off the top of a flat list.
+  Listing pages go first, since they are the smallest group and the hardest
+  to obtain, so they must never be what the cap discards.
+- Split the limits. Examining a document is one Redis lookup and is now
+  bounded at 2500. Fetching a body is a request to somebody else's server and
+  is bounded separately at 120. Anything over the fetch budget is left
+  unmarked for the next sweep rather than lost.
+- Health now counts sweeps that find nothing new anywhere, and calls the
+  crawler down after twelve in a row.
+
+After the fix: 2078 items, 1664 new, 118 sent to the model.
+
+## The crawl interval was a gap, not a period
+
+The loop swept and then waited the full interval, so the cycle was the
+interval plus the length of the sweep. With a short source list that was
+seconds of drift. With sixty five sources a sweep runs for nearly three
+minutes, so a four minute interval became a seven minute one and the site
+looked stalled between updates.
+
+It now waits the remainder of the interval, measured from the start of the
+sweep, and goes straight back round when a sweep ends with documents still to
+fetch instead of idling through a known backlog.
+
+Feeds are also read in parallel now, grouped by host so no host is hit twice
+at once. That matters because most of the search backed sources are on Google
+News, and firing a dozen requests at it together would be both rude and a good
+way to get refused. Sweeps went from about 2m45s to about 70s.
+
+**Known cost:** while catching up, each extra sweep re-reads all the feeds to
+find held over documents it has already identified. It is wasteful but only
+during catch up, which finishes in minutes, and persisting a pending list
+would add state that has to be kept consistent with what has been seen.
+
 ## Running the model on another machine was rejected
 
 Pointing the server at a laptop with more memory would allow a larger model. It

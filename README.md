@@ -117,7 +117,10 @@ Everything lives in `.env`.
 | `LLM_MODEL` | Which Ollama model reads articles. Default `qwen2.5:3b-instruct`. See `docs/DECISIONS.md` before changing it. |
 | `TELEGRAM_BOT_TOKEN` | From BotFather. Blank runs without Telegram. |
 | `TELEGRAM_ALLOWED_USER_ID` | The only user allowed to use the bot. |
-| `CRAWL_INTERVAL_SECONDS` | Gap between sweeps. Default 180. |
+| `CRAWL_INTERVAL_SECONDS` | Period between sweep starts, not the gap after one. Default 180. |
+| `MAX_DOCS_PER_SWEEP` | Documents examined per sweep. Wide, because looking is cheap. Default 2500. |
+| `MAX_FETCH_PER_SWEEP` | New bodies fetched per sweep. This is the expensive one. Default 120. |
+| `FEED_WORKERS` | Feed hosts read at once. Default 8. |
 | `SITES_PER_SWEEP` | Listing pages walked per sweep. Default 5. |
 | `API_BIND` / `WEB_BIND` | Which address to listen on. Loopback by default. |
 | `ALLOWED_ORIGINS` | Set to your public hostname before going public. |

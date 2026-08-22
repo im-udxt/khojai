@@ -47,12 +47,17 @@ One process, six threads, so a failure in one does not stop the others.
 
 | Thread | Interval | What it does |
 | --- | --- | --- |
-| `crawler` | 180s | One sweep of every source |
+| `crawler` | 180s | One sweep of every source, measured start to start |
 | `worker` | continuous | Takes documents off the queue, calls the model |
 | `health` | 30s | Writes the health snapshot Redis serves to the status page |
 | `metrics` | 45s | Writes machine load, disk and running totals |
 | `merge` | 30m | Folds duplicate names, queues the rest for review |
 | `markets` | 300s | Refreshes the small market strip |
+
+The crawler's interval is a period, not a gap. It waits the remainder of the
+interval after a sweep rather than the whole of it, so a slow sweep does not
+stretch the cycle. If a sweep ends with documents still to fetch it goes
+straight back round instead of idling.
 
 Telegram runs on the main thread's event loop. This matters: a revoked token
 once raised at startup and killed the process, taking the crawler and worker
@@ -74,8 +79,18 @@ source  ->  seen before?  ->  worth reading?  ->  fetch body  ->  near duplicate
 ```
 
 Four cheap tests run before the model is asked for anything, because the model
-is the slow part by a wide margin. A sweep looks at hundreds of items and sends
-a few dozen onward.
+is the slow part by a wide margin. A sweep looks at a couple of thousand items
+and sends a hundred or so onward.
+
+Two separate limits, because the costs are not alike. Looking at a document is
+one Redis lookup, so `MAX_DOCS_PER_SWEEP` is wide enough to reach every source.
+Fetching its body is a request to somebody else's server at one per second, so
+`MAX_FETCH_PER_SWEEP` bounds that. Anything over the fetch budget is left
+unmarked and picked up next sweep rather than lost.
+
+Items are taken from every source in turn rather than off the top of a flat
+list. Cutting a flat list reads the first few sources and never reaches the
+rest.
 
 The archive is written before anything is derived. It is the only copy of what
 was actually seen, and the graph is derived data that could be rebuilt from it.
@@ -147,6 +162,7 @@ microseconds without them.
 Every outbound request goes through one function that:
 
 - allows one request per second per host,
+- reads feeds on different hosts at the same time, but never two on one host,
 - sends an identifying user agent,
 - refuses any address that resolves to a private, loopback, link local or
   reserved range, **including after each redirect hop**,
