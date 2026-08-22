@@ -27,14 +27,17 @@ some are simply 404 now. A more honest user agent did not help; they are
 blocking anything that is not a browser.
 
 Their reporting is still indexed, so they are read through a search scoped to
-the outlet instead. This includes The Wire, Scroll, ThePrint, LiveLaw, The
-Caravan, Article 14, Firstpost, Reuters India, Deccan Herald, Telegraph India,
-New Indian Express, Financial Express, The Federal, IndiaSpend and Down To
-Earth.
+the outlet instead. This includes The Wire, ThePrint, LiveLaw, The Caravan,
+Article 14, Reuters India, Telegraph India, New Indian Express, Financial
+Express, The Federal, IndiaSpend and Down To Earth.
 
-It is a worse source than a feed. The body still has to be fetched from a site
-that may refuse, and only the search snippet is guaranteed. It is much better
-than losing the outlet.
+It is a much worse source than a feed, for the reason in the next section, and
+it should be treated as a way of knowing something was published rather than a
+way of reading it.
+
+Scroll, Firstpost and Deccan Herald were moved off search and onto their own
+section pages, which can be walked directly. That gets the body back, which
+search never could.
 
 ## Topic searches
 
@@ -48,7 +51,14 @@ funding and party organisation, candidate asset declarations, SEBI orders,
 insolvency, income tax action, state vigilance, RTI replies, cabinet decisions,
 land and mining, and fraud investigations.
 
-These are consistently among the highest yield sources in the whole list.
+**They return headlines, not articles.** A Google News link goes to a redirect
+page that only a browser can follow, so the body can never be fetched and a
+claim needs a sentence quoted from the body. Measured on live traffic, 31 of
+40 documents arriving this way had no readable body.
+
+They were counted as high yield because they returned a lot of items. Items
+are not claims. A source that returns fifty headlines and no article text
+contributes nothing to the graph, and the Sources tab now separates the two.
 
 ## Listing pages
 

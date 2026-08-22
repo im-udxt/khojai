@@ -87,6 +87,52 @@ find held over documents it has already identified. It is wasteful but only
 during catch up, which finishes in minutes, and persisting a pending list
 would add state that has to be kept consistent with what has been seen.
 
+## Search feeds return headlines, and headlines are not evidence
+
+Fifteen outlets whose feeds started refusing us were routed through a search
+scoped to each outlet. Every source then reported itself as producing, and 57
+of 65 looked healthy.
+
+They were producing items that could never become a claim. A Google News link
+points at a redirect page that only a browser can follow: fetching it returns
+590 KB of HTML whose entire text is the words "Google News". The article URL
+exists only inside an opaque blob in the path. So the body was never obtained,
+and a claim needs a sentence quoted from the body, since a headline proves
+nothing.
+
+Measured on live traffic: 31 of 40 documents arriving had no readable body.
+They were queued anyway, handed to the model, counted as processed, and
+dropped inside the extractor for being too short. `processed` climbed while
+`claims` stood still for forty minutes.
+
+Three things changed:
+
+- The body length is checked before a document is queued rather than after it
+  is handed to the model, and a document with no body is counted as such.
+  Queue slots and model time stop being spent on things that cannot yield.
+- Scroll, Firstpost and Deccan Herald turned out to have section pages that
+  can be walked directly, which gets the body back. They were moved off
+  search. The Wire, ThePrint, LiveLaw, Telegraph India and the rest could not
+  be, and remain headline only.
+- The Sources tab separates items returned from documents with a usable body,
+  because the first number was hiding the second.
+
+The lesson is that "the source is producing" was the wrong thing to measure.
+Counting items made a source that contributes nothing look identical to one
+carrying the graph.
+
+## The verbatim quote rule was rejecting good quotes over punctuation
+
+It compared the model's quote against the article after collapsing whitespace
+and lowercasing. An article writes "in-charge of communications" and the model
+writes "in charge of communications", and a real sentence was treated as
+invented.
+
+Quotes are now compared on their word sequence with typography and
+punctuation removed. The guarantee is unchanged in every way that matters: the
+model still cannot add, drop, reorder or alter a word. `tests/test_quote_match.py`
+holds both halves, including fragments that are real but were never adjacent.
+
 ## Running the model on another machine was rejected
 
 Pointing the server at a laptop with more memory would allow a larger model. It
