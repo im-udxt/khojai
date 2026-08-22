@@ -148,7 +148,7 @@ def collect(docs, priority=False):
     unmarked so the next sweep picks it up rather than losing it.
     """
     counts = {"in": len(docs), "new": 0, "relevant": 0, "queued": 0,
-              "held_over": 0}
+              "held_over": 0, "no_body": 0}
     budget = config.MAX_FETCH_PER_SWEEP if not priority else len(docs)
     for doc in docs:
         db.stat("seen")
@@ -169,6 +169,18 @@ def collect(docs, priority=False):
         if len(body) > len(doc.get("text", "")):
             doc["text"] = body
         mark_seen(doc["url"])
+
+        # A document with no body cannot produce a sourced claim, because a
+        # claim needs a sentence quoted from the article and a headline is
+        # not one. This used to be checked after the document had been queued
+        # and handed to the model, so it counted as processed and produced
+        # nothing. Most of what a search feed returns fails here: the link
+        # goes to a redirect page rather than to the article.
+        if len((doc.get("text") or "").strip()) < config.EXTRACT_MIN_CHARS:
+            db.stat("no_body")
+            db.count_outlet(doc.get("outlet"), "nobody")
+            counts["no_body"] += 1
+            continue
 
         if is_near_duplicate(doc.get("text", "") or doc.get("title", "")):
             db.stat("duplicate")
@@ -248,9 +260,10 @@ def sweep():
         pass
 
     held = f", {counts['held_over']} held over" if counts.get("held_over") else ""
+    empty = f", {counts['no_body']} with no body" if counts.get("no_body") else ""
     db.activity("crawler",
                 f"{counts['in']} items, {counts['new']} new, "
-                f"{counts['queued']} sent to the model{held}")
+                f"{counts['queued']} sent to the model{empty}{held}")
     return counts
 
 

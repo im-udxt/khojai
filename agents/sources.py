@@ -58,16 +58,13 @@ NEWS_FEEDS = [
 # it is much better than losing the outlet.
 VIA_SEARCH = [
     ("thewire", "The Wire", "site:thewire.in", 1),
-    ("scroll", "Scroll.in", "site:scroll.in", 1),
     ("theprint", "ThePrint", "site:theprint.in", 2),
     ("livelaw", "LiveLaw", "site:livelaw.in", 1),
     ("caravan", "The Caravan", "site:caravanmagazine.in", 2),
     ("article14", "Article 14", "site:article-14.com", 1),
-    ("firstpost", "Firstpost", "site:firstpost.com", 2),
     ("reuters_india", "Reuters India", "reuters india", 1),
     ("financialexpress", "Financial Express", "site:financialexpress.com", 2),
     ("thefederal", "The Federal", "site:thefederal.com", 2),
-    ("deccanherald", "Deccan Herald", "site:deccanherald.com", 2),
     ("telegraph", "Telegraph India", "site:telegraphindia.com", 2),
     ("tnie", "New Indian Express", "site:newindianexpress.com", 2),
     ("indiaspend", "IndiaSpend", "site:indiaspend.com", 1),
@@ -144,6 +141,15 @@ SITES = [
      r"question|/ls/[a-z]", 2),
     ("s_mumbaipolice", "Mumbai Police", "https://mumbaipolice.gov.in/PressRelease",
      r"PressRelease|Press", 2),
+    # Outlets whose feed is blocked but whose own pages can still be read.
+    # Reaching them through a search returned only a redirect page, so the
+    # body was never obtained and nothing they published could be used.
+    ("scroll", "Scroll.in", "https://scroll.in/latest",
+     r"/article/|/latest/", 1),
+    ("firstpost", "Firstpost", "https://www.firstpost.com/india",
+     r"/india/|/politics/", 2),
+    ("deccanherald", "Deccan Herald", "https://www.deccanherald.com/india",
+     r"/india/|/national/", 2),
 ]
 
 # How many listing pages to walk in one sweep. They are slower and less

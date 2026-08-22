@@ -102,6 +102,24 @@ def _normalise(text):
     return WS.sub(" ", (text or "")).strip().lower()
 
 
+WORD_ONLY = re.compile(r"[a-z0-9]+")
+
+
+def _words(text):
+    """The word sequence, with typography and punctuation removed.
+
+    The verbatim rule is what makes a claim checkable, so it stays. But it was
+    also throwing away good claims over a curly apostrophe or a hyphen: an
+    article writes "in-charge" and the model writes "in charge", and a real
+    sentence was treated as invented. Comparing the words in order keeps the
+    guarantee, because the model still cannot add, drop or reorder a word,
+    while ignoring differences that carry no meaning.
+    """
+    import unicodedata
+    text = unicodedata.normalize("NFKC", text or "").lower()
+    return " ".join(WORD_ONLY.findall(text))
+
+
 # Models that reason out loud before answering. Ollama puts that reasoning in
 # a separate field and leaves the answer empty, so a schema that is obeyed
 # perfectly still arrives as nothing. Asking them not to think is what makes
@@ -200,6 +218,7 @@ def claims_from(doc):
     # The quote must come from the body. Small models otherwise copy the
     # headline for every claim, which proves nothing.
     haystack = _normalise(body)
+    haystack_words = _words(body)
     out = []
     for item in (data.get("claims") or [])[:12]:
         if not isinstance(item, dict):
@@ -207,7 +226,7 @@ def claims_from(doc):
         quote = (item.get("quote") or "").strip()
         if len(quote) < 25:
             continue
-        if _normalise(quote) not in haystack:
+        if _normalise(quote) not in haystack and _words(quote) not in haystack_words:
             continue
 
         subject = entities.canonical(item.get("subject"), item.get("subject_type"))
