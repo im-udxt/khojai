@@ -151,6 +151,10 @@ SITES = [
 # of all at once every few minutes.
 SITES_PER_SWEEP = int(os.environ.get("SITES_PER_SWEEP", "5"))
 
+# Feeds read at the same time, counted in hosts rather than feeds so one
+# host is never hit concurrently.
+FEED_WORKERS = int(os.environ.get("FEED_WORKERS", "8"))
+
 # Older callers still import FEEDS.
 FEEDS = NEWS_FEEDS
 
@@ -199,40 +203,76 @@ def strip_html(html):
     return WS_RE.sub(" ", text).strip()
 
 
+def _read_one(entry):
+    """Pull a single feed. Returns (outlet_id, docs, note)."""
+    outlet_id, name, url, tier = entry
+    docs = []
+    try:
+        parsed = feedparser.parse(url, agent=config.USER_AGENT)
+        for item in parsed.entries[:60]:
+            link = getattr(item, "link", "")
+            title = getattr(item, "title", "")
+            if not link or not title:
+                continue
+            docs.append({
+                "url": link.split("?utm")[0],
+                "title": title.strip(),
+                "text": strip_html(getattr(item, "summary", "")),
+                "outlet": name,
+                "outlet_id": outlet_id,
+                "tier": tier,
+                "published": getattr(item, "published", "") or getattr(item, "updated", ""),
+                "via": "feed",
+            })
+        return outlet_id, docs, "ok" if docs else "feed returned nothing"
+    except Exception as exc:
+        return outlet_id, [], str(exc)[:70]
+
+
 def read_feeds(feeds=None):
     """Pull every feed once and return document dicts.
+
+    Feeds on different hosts are read at the same time, because reading
+    fifty two of them one after another took most of a sweep. Feeds that
+    share a host stay in single file: most of the search backed sources are
+    all on Google News, and firing a dozen requests at it at once would be
+    both rude and a good way to get refused.
 
     What each feed returned is recorded, so a feed that has quietly died
     shows up on the status page instead of just contributing nothing.
     """
+    from concurrent.futures import ThreadPoolExecutor
+    from urllib.parse import urlparse
+
     import crawl
 
+    entries = feeds if feeds is not None else all_feeds()
+
+    by_host = {}
+    for entry in entries:
+        host = urlparse(entry[2]).netloc.lower()
+        by_host.setdefault(host, []).append(entry)
+
+    def run_host(group):
+        out = []
+        for entry in group:
+            out.append(_read_one(entry))
+        return out
+
     docs = []
-    for outlet_id, name, url, tier in (feeds if feeds is not None else all_feeds()):
-        found = 0
-        try:
-            parsed = feedparser.parse(url, agent=config.USER_AGENT)
-            for item in parsed.entries[:60]:
-                link = getattr(item, "link", "")
-                title = getattr(item, "title", "")
-                if not link or not title:
-                    continue
-                summary = strip_html(getattr(item, "summary", ""))
-                docs.append({
-                    "url": link.split("?utm")[0],
-                    "title": title.strip(),
-                    "text": summary,
-                    "outlet": name,
-                    "outlet_id": outlet_id,
-                    "tier": tier,
-                    "published": getattr(item, "published", "") or getattr(item, "updated", ""),
-                    "via": "feed",
-                })
-                found += 1
-            crawl.note(outlet_id, found, "ok" if found else "feed returned nothing")
-        except Exception as exc:
-            crawl.note(outlet_id, 0, str(exc)[:70])
-            log.warning("feed failed %s: %s", outlet_id, str(exc)[:100])
+    workers = min(FEED_WORKERS, max(len(by_host), 1))
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for results in pool.map(run_host, by_host.values()):
+                for outlet_id, found, note in results:
+                    docs.extend(found)
+                    crawl.note(outlet_id, len(found), note)
+    except Exception as exc:
+        log.warning("parallel feed read failed, falling back: %s", str(exc)[:100])
+        for entry in entries:
+            outlet_id, found, note = _read_one(entry)
+            docs.extend(found)
+            crawl.note(outlet_id, len(found), note)
     return docs
 
 

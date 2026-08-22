@@ -7,6 +7,7 @@ is judged on progress, not on whether a port answers.
 """
 import json
 import logging
+import os
 import time
 
 import config
@@ -20,6 +21,10 @@ CRAWLER_BEAT = "khoj:beat:crawler"
 WORKER_FAILS = "khoj:worker:fails"
 STALE_WORKER = 300
 STALE_CRAWLER_FACTOR = 3
+BARREN = "khoj:crawler:barren"
+# Sweeps in a row that find nothing new anywhere before it counts as a fault.
+# High enough that a quiet hour cannot trip it.
+BARREN_SWEEPS = int(os.environ.get("BARREN_SWEEPS", "12"))
 
 
 def beat(key, detail=""):
@@ -96,12 +101,26 @@ def check():
     crawler = _read_beat(CRAWLER_BEAT)
     c_age = _age(crawler)
     limit = config.CRAWL_INTERVAL * STALE_CRAWLER_FACTOR
+    barren = 0
+    try:
+        barren = int(rds.get(BARREN) or 0) if rds else 0
+    except Exception:
+        pass
+
     if c_age is None:
         services["crawler"] = {"state": "down", "note": "never reported in"}
     elif c_age > limit:
         services["crawler"] = {"state": "down", "note": f"last swept {int(c_age)}s ago"}
+    elif barren >= BARREN_SWEEPS:
+        # The crawler is running and finding nothing across every source. That
+        # is what a starved intake looks like, and it is invisible from the
+        # queue: a starved crawler and a caught up one both leave it empty.
+        services["crawler"] = {
+            "state": "down",
+            "note": f"running but nothing new in {barren} sweeps, check the sources"}
     else:
-        services["crawler"] = {"state": "up", "note": f"every {config.CRAWL_INTERVAL}s"}
+        services["crawler"] = {"state": "up",
+                               "note": (crawler or {}).get("detail") or "sweeping"}
 
     day = time.strftime("%Y%m%d", time.gmtime())
     processed = 0

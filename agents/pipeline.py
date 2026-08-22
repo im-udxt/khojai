@@ -234,22 +234,60 @@ def sweep():
     docs = walked + interleave(feed_docs, max(config.MAX_DOCS_PER_SWEEP - len(walked), 1))
     counts = collect(docs)
     counts["from_sites"] = len(walked)
+
+    # A run of sweeps that finds nothing new anywhere is a fault, not a quiet
+    # news day. Health cannot see it from the queue, because a starved intake
+    # and a caught up one both leave the queue empty.
+    try:
+        if counts["new"]:
+            db.rds().delete("khoj:crawler:barren")
+        else:
+            db.rds().incr("khoj:crawler:barren")
+            db.rds().expire("khoj:crawler:barren", 86400)
+    except Exception:
+        pass
+
+    held = f", {counts['held_over']} held over" if counts.get("held_over") else ""
     db.activity("crawler",
                 f"{counts['in']} items, {counts['new']} new, "
-                f"{counts['queued']} sent to the model")
+                f"{counts['queued']} sent to the model{held}")
     return counts
 
 
 def crawl_loop(stop):
+    """Sweep on a period, not on a gap.
+
+    This used to sweep and then wait the full interval, so the real cycle was
+    the interval plus however long the sweep took. With a short source list
+    that was a few seconds of drift. With sixty five sources a sweep runs for
+    nearly three minutes, so a four minute interval became a seven minute
+    one and the site looked stalled between updates.
+
+    It also sat idle through that wait while documents it already knew were
+    new went unfetched. When the fetch budget runs out there is work in hand,
+    so it goes straight back round instead.
+    """
     import health
+
     while not stop.is_set():
+        started = time.monotonic()
+        held_over = 0
         try:
             health.beat(health.CRAWLER_BEAT, "sweeping")
-            sweep()
-            health.beat(health.CRAWLER_BEAT, "waiting")
+            counts = sweep() or {}
+            held_over = counts.get("held_over", 0)
         except Exception as exc:
             log.exception("sweep failed: %s", exc)
-        stop.wait(config.CRAWL_INTERVAL)
+
+        if held_over:
+            wait = config.CRAWL_MIN_GAP
+            health.beat(health.CRAWLER_BEAT,
+                        f"{held_over} known documents still to fetch")
+        else:
+            elapsed = time.monotonic() - started
+            wait = max(config.CRAWL_INTERVAL - elapsed, config.CRAWL_MIN_GAP)
+            health.beat(health.CRAWLER_BEAT, "waiting")
+        stop.wait(wait)
 
 
 def process_one(doc):

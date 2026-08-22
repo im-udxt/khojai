@@ -25,6 +25,9 @@ LLM_DAILY_LIMIT = int(os.environ.get("LLM_DAILY_LIMIT", "0"))
 
 ARCHIVE_DIR = os.environ.get("ARCHIVE_DIR", "/archive")
 CRAWL_INTERVAL = int(os.environ.get("CRAWL_INTERVAL_SECONDS", "180"))
+# Measured from the start of one sweep to the start of the next, so a slow
+# sweep does not stretch the cycle. This is the floor between sweeps.
+CRAWL_MIN_GAP = int(os.environ.get("CRAWL_MIN_GAP_SECONDS", "20"))
 # How many documents a sweep looks at. Looking is one Redis lookup, so this
 # is wide enough to reach every source. What it must never do is cut the
 # source list short, which is what happened when it was 300.
