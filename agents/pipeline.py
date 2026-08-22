@@ -139,8 +139,17 @@ def queue_for_model(doc):
 
 
 def collect(docs, priority=False):
-    """Run documents through the cheap steps and queue the survivors."""
-    counts = {"in": len(docs), "new": 0, "relevant": 0, "queued": 0}
+    """Run documents through the cheap steps and queue the survivors.
+
+    Looking at a document is cheap: one Redis lookup says whether it has been
+    seen. Fetching its body is not, because it is a request to somebody else's
+    server at one per second. So the number examined is left wide and the
+    number fetched is what gets a budget. Anything past the budget is left
+    unmarked so the next sweep picks it up rather than losing it.
+    """
+    counts = {"in": len(docs), "new": 0, "relevant": 0, "queued": 0,
+              "held_over": 0}
+    budget = config.MAX_FETCH_PER_SWEEP if not priority else len(docs)
     for doc in docs:
         db.stat("seen")
         db.count_outlet(doc.get("outlet"), "seen")
@@ -151,6 +160,10 @@ def collect(docs, priority=False):
             mark_seen(doc["url"])
             continue
         counts["relevant"] += 1
+        if budget <= 0:
+            counts["held_over"] += 1
+            continue
+        budget -= 1
 
         body = sources.fetch_article(doc["url"])
         if len(body) > len(doc.get("text", "")):
@@ -170,10 +183,42 @@ def collect(docs, priority=False):
     return counts
 
 
+def interleave(docs, cap):
+    """Take from every source in turn until the cap is reached.
+
+    Cutting a flat list at the cap reads the first few sources and never
+    reaches the rest. With 26 sources that was survivable. With 65 it meant
+    5 sources were read and 47 were not, and the crawler spent every sweep
+    re-reading the same articles it had already seen.
+    """
+    buckets, order = {}, []
+    for doc in docs:
+        key = doc.get("outlet_id") or "unknown"
+        if key not in buckets:
+            buckets[key] = []
+            order.append(key)
+        buckets[key].append(doc)
+
+    out, depth = [], 0
+    while len(out) < cap:
+        took = False
+        for key in order:
+            group = buckets[key]
+            if depth < len(group):
+                out.append(group[depth])
+                took = True
+                if len(out) >= cap:
+                    break
+        if not took:
+            break
+        depth += 1
+    return out
+
+
 def sweep():
     """One pass over the feeds, the topic searches and a few listing pages."""
     db.activity("crawler", "reading feeds and searches")
-    docs = sources.read_feeds()
+    feed_docs = sources.read_feeds()
 
     walked = []
     try:
@@ -184,7 +229,9 @@ def sweep():
     except Exception as exc:
         log.warning("site walk skipped: %s", str(exc)[:100])
 
-    docs = (docs + walked)[:config.MAX_DOCS_PER_SWEEP]
+    # Listing pages go first. They are the smallest group and the hardest to
+    # get, so they must never be the ones the cap throws away.
+    docs = walked + interleave(feed_docs, max(config.MAX_DOCS_PER_SWEEP - len(walked), 1))
     counts = collect(docs)
     counts["from_sites"] = len(walked)
     db.activity("crawler",

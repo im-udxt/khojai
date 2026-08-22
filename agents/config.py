@@ -25,7 +25,13 @@ LLM_DAILY_LIMIT = int(os.environ.get("LLM_DAILY_LIMIT", "0"))
 
 ARCHIVE_DIR = os.environ.get("ARCHIVE_DIR", "/archive")
 CRAWL_INTERVAL = int(os.environ.get("CRAWL_INTERVAL_SECONDS", "180"))
-MAX_DOCS_PER_SWEEP = int(os.environ.get("MAX_DOCS_PER_SWEEP", "400"))
+# How many documents a sweep looks at. Looking is one Redis lookup, so this
+# is wide enough to reach every source. What it must never do is cut the
+# source list short, which is what happened when it was 300.
+MAX_DOCS_PER_SWEEP = int(os.environ.get("MAX_DOCS_PER_SWEEP", "2500"))
+# How many new bodies a sweep fetches. This is the expensive number: each
+# one is a request to somebody else's server at one per second.
+MAX_FETCH_PER_SWEEP = int(os.environ.get("MAX_FETCH_PER_SWEEP", "120"))
 EXTRACT_MIN_CHARS = int(os.environ.get("EXTRACT_MIN_CHARS", "280"))
 # Second model pass over each claim. Off by default: with a 3B model it
 # dropped correct claims as often as it caught wrong ones. Worth trying
