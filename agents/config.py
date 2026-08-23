@@ -19,7 +19,10 @@ REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://host.docker.internal:11434").rstrip("/")
 LLM_MODEL = os.environ.get("LLM_MODEL", "qwen2.5:3b-instruct")
-LLM_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "180"))
+LLM_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "150"))
+# Longest gap between tries when the model keeps failing. Without a cap
+# on the wait, a wedged model is retried every fifteen seconds forever.
+WORKER_MAX_BACKOFF = int(os.environ.get("WORKER_MAX_BACKOFF", "300"))
 LLM_CONTEXT = int(os.environ.get("LLM_CONTEXT", "8192"))
 LLM_DAILY_LIMIT = int(os.environ.get("LLM_DAILY_LIMIT", "0"))
 

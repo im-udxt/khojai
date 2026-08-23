@@ -359,12 +359,24 @@ def worker_loop(stop):
         except Exception as exc:
             # Count consecutive failures so health can tell a model that
             # answers but cannot produce anything from a healthy one.
+            fails = 1
             try:
-                db.rds().incr(health.WORKER_FAILS)
+                fails = int(db.rds().incr(health.WORKER_FAILS))
                 db.rds().expire(health.WORKER_FAILS, 1800)
             except Exception:
                 pass
             log.warning("processing failed, document returned to queue: %s",
                         str(exc)[:120])
             db.rds().rpush("khoj:queue", raw)
-            stop.wait(15)
+
+            # Back off as failures stack up. A wedged model holds every
+            # request until it times out, so retrying straight away costs
+            # three minutes a time and keeps the machine under load while it
+            # is trying to recover. Six hundred failures in a row is what
+            # this looked like before.
+            wait = min(15 * fails, config.WORKER_MAX_BACKOFF)
+            if fails in (5, 20, 100):
+                db.activity("worker",
+                            f"the model has failed {fails} times in a row, "
+                            f"waiting {wait}s between tries")
+            stop.wait(wait)
