@@ -133,6 +133,74 @@ punctuation removed. The guarantee is unchanged in every way that matters: the
 model still cannot add, drop, reorder or alter a word. `tests/test_quote_match.py`
 holds both halves, including fragments that are real but were never adjacent.
 
+## Qwen3.5 was measured and not adopted
+
+Qwen3.5 appeared after this project started. Both the standard and the MLX
+build were pulled and run through the real extraction path on real archived
+articles, against the model in use.
+
+| | qwen2.5:3b-instruct | qwen3.5:2b | qwen3.5:2b-mlx |
+| --- | --- | --- | --- |
+| Six articles | 52s | 171s | 163s |
+| Slowest single article | 16s | 50s | 44s |
+| Claims | 3 | 7 | 8 |
+
+More claims, but most of the extra were `MENTIONED_WITH`, which is the label
+used when the model does not know what the relationship is. Both still
+produced plainly wrong relations, such as *Goa Government appointed Tarun
+Tejpal*. The MLX build, which is compiled for Apple Silicon, was no faster
+than the plain one.
+
+Three times slower matters more than it sounds on this machine, because
+timeouts are the failure mode that takes the pipeline down. It stays on
+qwen2.5:3b-instruct.
+
+**On running a larger model here at all:** the machine has 8 GB shared between
+macOS, a 3 GiB Linux virtual machine, Ollama, and two other projects. Ollama
+gets roughly 2.5 GB. qwen3.5:9b needs 6.6 GB and cannot fit, and no
+quantisation or offloading trick closes a gap that size. The ceiling is
+hardware, not configuration.
+
+## The model has to stay loaded
+
+Ollama unloads a model after five minutes idle, and loading this one from
+disk takes about fifty seconds on this machine, which is longer than most
+extractions take.
+
+That turned into a loop that ran for a day. An extraction waited for the
+reload, ran out of time, was counted as a failure, and the worker backed off.
+The backoff climbed to 300 seconds, which is exactly the idle timeout, so the
+model unloaded again before the next try, which then also paid the reload and
+also timed out. The backoff was keeping the failure alive.
+
+Requests now carry `keep_alive`, the worker loads the model before using it,
+startup warms it, and the backoff is capped at 90 seconds so it can never
+again exceed the idle window.
+
+## An answer with a schema still needs a length limit
+
+A JSON schema constrains the shape of the answer, not how much of it there
+is. A model that started repeating itself kept emitting array items until it
+ran out of context, which turned ordinary articles into 149 second calls and
+then into timeouts. Output is now capped, and per article time went from
+2 to 149 seconds down to a steady 2 to 16.
+
+## The first watchdog never fired
+
+It asked Ollama to generate two tokens and restarted after two failures in a
+row. It never once acted, for two reasons:
+
+- The probe was easier than the work. Two tokens succeed while a real
+  extraction with an eight thousand token context times out.
+- The fault came and went. Its log filled with "no answer, strike 1" followed
+  by "answering again", so it never reached a second consecutive strike,
+  while the pipeline failed 176 extractions in a row.
+
+It now reads the count of consecutive extraction failures that the agents
+container already keeps, which is the only measure that matters: whether the
+real work is getting done. **A health check that tests something easier than
+the workload is not a health check.**
+
 ## Running the model on another machine was rejected
 
 Pointing the server at a laptop with more memory would allow a larger model. It
