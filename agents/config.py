@@ -33,6 +33,9 @@ LLM_KEEP_ALIVE = os.environ.get("LLM_KEEP_ALIVE", "30m")
 # Loading is slower than answering, so warming gets its own longer allowance.
 LLM_LOAD_TIMEOUT = float(os.environ.get("LLM_LOAD_TIMEOUT", "300"))
 LLM_CONTEXT = int(os.environ.get("LLM_CONTEXT", "8192"))
+# Longest answer the model may produce. Bounds the worst case time of a
+# single extraction, which is what a timeout actually is.
+LLM_MAX_OUTPUT = int(os.environ.get("LLM_MAX_OUTPUT", "1024"))
 LLM_DAILY_LIMIT = int(os.environ.get("LLM_DAILY_LIMIT", "0"))
 
 ARCHIVE_DIR = os.environ.get("ARCHIVE_DIR", "/archive")

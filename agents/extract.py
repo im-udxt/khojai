@@ -144,7 +144,16 @@ def call_model(prompt, system=SYSTEM, json_mode=True, timeout=None, schema=None)
         # request into a timeout. Holding it resident is the difference
         # between working and not.
         "keep_alive": config.LLM_KEEP_ALIVE,
-        "options": {"temperature": 0, "num_ctx": config.LLM_CONTEXT},
+        "options": {
+            "temperature": 0,
+            "num_ctx": config.LLM_CONTEXT,
+            # A schema constrains the shape of the answer, not its length. A
+            # model that starts repeating itself will keep emitting array
+            # items until it runs out of context, which turned ordinary
+            # articles into two and a half minute calls and then timeouts.
+            # Twelve claims is already more than any article yields.
+            "num_predict": config.LLM_MAX_OUTPUT,
+        },
     }
     if thinks(config.LLM_MODEL):
         payload["think"] = False
