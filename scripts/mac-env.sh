@@ -10,7 +10,9 @@
 # desktop app anyway, so this machine runs colima with the standalone
 # docker-compose binary and a config directory that holds no credentials.
 
-export PATH="/opt/homebrew/bin:$PATH"
+# ~/bin holds a docker symlink. colima refuses to start without a docker
+# command on PATH, and only docker-compose was ever linked here.
+export PATH="$HOME/bin:/opt/homebrew/bin:$PATH"
 export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
 export DOCKER_CONFIG="$HOME/.docker-clean"
 

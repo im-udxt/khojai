@@ -8,6 +8,7 @@ import time
 
 import config
 import db
+import extract
 import health
 import merge
 import metrics
@@ -50,6 +51,9 @@ def main():
     health.publish()
     metrics.publish()
     db.activity("system", "started")
+
+    # Pay the model load once, here, rather than inside the first extraction.
+    threading.Thread(target=extract.warm, name="warm", daemon=True).start()
 
     stop = threading.Event()
     threads = [

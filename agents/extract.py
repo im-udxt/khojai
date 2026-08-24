@@ -138,6 +138,12 @@ def call_model(prompt, system=SYSTEM, json_mode=True, timeout=None, schema=None)
         "prompt": prompt,
         "system": system,
         "stream": False,
+        # Ollama unloads a model after five minutes idle and reloading it
+        # from disk costs about fifty seconds on this machine. That is longer
+        # than most extractions take, so an unloaded model turned every first
+        # request into a timeout. Holding it resident is the difference
+        # between working and not.
+        "keep_alive": config.LLM_KEEP_ALIVE,
         "options": {"temperature": 0, "num_ctx": config.LLM_CONTEXT},
     }
     if thinks(config.LLM_MODEL):
@@ -172,6 +178,38 @@ def model_ready():
         names = [m.get("name", "") for m in resp.json().get("models", [])]
         wanted = config.LLM_MODEL.split(":")[0]
         return any(n.startswith(wanted) for n in names)
+    except Exception:
+        return False
+
+
+def warm():
+    """Load the model and keep it resident.
+
+    Called at startup and whenever it looks unloaded, so the cost of loading
+    is paid once here rather than inside an extraction that then times out.
+    """
+    try:
+        resp = httpx.post(
+            f"{config.OLLAMA_URL}/api/generate",
+            json={"model": config.LLM_MODEL, "prompt": "ok", "stream": False,
+                  "keep_alive": config.LLM_KEEP_ALIVE,
+                  "options": {"num_predict": 1}},
+            timeout=config.LLM_LOAD_TIMEOUT)
+        return resp.status_code == 200
+    except Exception as exc:
+        log.warning("could not warm the model: %s", str(exc)[:90])
+        return False
+
+
+def loaded():
+    """True when the model is already in memory, so no reload is coming."""
+    try:
+        resp = httpx.get(f"{config.OLLAMA_URL}/api/ps", timeout=5)
+        if resp.status_code != 200:
+            return False
+        wanted = config.LLM_MODEL.split(":")[0]
+        return any((m.get("name") or "").startswith(wanted)
+                   for m in resp.json().get("models", []))
     except Exception:
         return False
 

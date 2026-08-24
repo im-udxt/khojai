@@ -343,6 +343,14 @@ def worker_loop(stop):
             continue
         db.rds().delete("khoj:model_down")
 
+        # Load it before asking it to do anything. An extraction that has to
+        # wait for a reload runs out of time and is counted as a failure,
+        # which is what a whole day of processing nothing looked like.
+        if not extract.loaded():
+            health.beat(health.WORKER_BEAT, "loading the model")
+            db.activity("worker", "loading the model into memory")
+            extract.warm()
+
         raw = db.rds().rpop("khoj:queue:priority") or db.rds().rpop("khoj:queue")
         if not raw:
             health.beat(health.WORKER_BEAT, "idle")

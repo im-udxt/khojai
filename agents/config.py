@@ -22,7 +22,16 @@ LLM_MODEL = os.environ.get("LLM_MODEL", "qwen2.5:3b-instruct")
 LLM_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "150"))
 # Longest gap between tries when the model keeps failing. Without a cap
 # on the wait, a wedged model is retried every fifteen seconds forever.
-WORKER_MAX_BACKOFF = int(os.environ.get("WORKER_MAX_BACKOFF", "300"))
+#
+# This must stay well under the model's keep alive. At 300 seconds it matched
+# it exactly, so the model unloaded between every retry, each retry paid the
+# reload and timed out, and the backoff kept the loop alive indefinitely.
+WORKER_MAX_BACKOFF = int(os.environ.get("WORKER_MAX_BACKOFF", "90"))
+# How long Ollama holds the model in memory after a request. Loading it costs
+# about fifty seconds here, so it is held rather than reloaded.
+LLM_KEEP_ALIVE = os.environ.get("LLM_KEEP_ALIVE", "30m")
+# Loading is slower than answering, so warming gets its own longer allowance.
+LLM_LOAD_TIMEOUT = float(os.environ.get("LLM_LOAD_TIMEOUT", "300"))
 LLM_CONTEXT = int(os.environ.get("LLM_CONTEXT", "8192"))
 LLM_DAILY_LIMIT = int(os.environ.get("LLM_DAILY_LIMIT", "0"))
 
